@@ -29,6 +29,10 @@ class PM2TelegramBot {
     this.auditLogCurrentLines = 0;
 
     // Simplified audit logging - we'll get user info directly from ctx
+    
+    // PM2 connection management
+    this.pm2Connected = false;
+    this.pm2ConnectionPromise = null;
 
     // Initialize audit logging
     if (this.auditLoggingEnabled) {
@@ -1301,33 +1305,62 @@ class PM2TelegramBot {
       }
     }
   }
-  // PM2 wrapper methods
-  async getPM2Processes() {
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) return reject(err);
+  // Safe PM2 connection management
+  async ensurePM2Connection() {
+    if (this.pm2Connected) {
+      return Promise.resolve();
+    }
 
+    if (this.pm2ConnectionPromise) {
+      return this.pm2ConnectionPromise;
+    }
+
+    this.pm2ConnectionPromise = new Promise((resolve, reject) => {
+      pm2.connect((err) => {
+        this.pm2ConnectionPromise = null;
+        if (err) {
+          console.error('PM2 connection failed:', err);
+          return reject(err);
+        }
+        this.pm2Connected = true;
+        console.log('✅ PM2 connected safely');
+        resolve();
+      });
+    });
+
+    return this.pm2ConnectionPromise;
+  }
+
+  async safePM2Operation(operation, operationName = 'operation') {
+    try {
+      await this.ensurePM2Connection();
+      return await operation();
+    } catch (error) {
+      console.error(`PM2 ${operationName} failed:`, error);
+      // Reset connection state on error
+      this.pm2Connected = false;
+      throw error;
+    }
+  }
+
+  // PM2 wrapper methods with safe connection handling
+  async getPM2Processes() {
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.list((err, processes) => {
-          pm2.disconnect();
           if (err) return reject(err);
           resolve(processes);
         });
       });
-    });
+    }, 'list processes');
   }
 
   async pm2Restart(processName, ctx = null) {
     await this.logAuditWithCtx('PM2_RESTART', `Restarting process: ${processName}`, { processName }, ctx);
 
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for restart: ${processName}`, { processName, error: err.message }, ctx);
-          return reject(err);
-        }
-
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.restart(processName, async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', `Failed to restart: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
@@ -1336,21 +1369,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, `restart ${processName}`);
   }
 
   async pm2RestartAll(ctx = null) {
     await this.logAuditWithCtx('PM2_RESTART_ALL', 'Restarting all processes', {}, ctx);
 
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for restart all', { error: err.message }, ctx);
-          return reject(err);
-        }
-
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.restart("all", async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', 'Failed to restart all processes', { error: err.message }, ctx);
             return reject(err);
@@ -1359,21 +1386,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, 'restart all processes');
   }
 
   async pm2Stop(processName, ctx = null) {
     await this.logAuditWithCtx('PM2_STOP', `Stopping process: ${processName}`, { processName }, ctx);
 
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for stop: ${processName}`, { processName, error: err.message }, ctx);
-          return reject(err);
-        }
-
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.stop(processName, async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', `Failed to stop: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
@@ -1382,21 +1403,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, `stop ${processName}`);
   }
 
   async pm2StopAll(ctx = null) {
     await this.logAuditWithCtx('PM2_STOP_ALL', 'Stopping all processes', {}, ctx);
-
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for stop all', { error: err.message }, ctx);
-          return reject(err);
-        }
-
+    
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.stop("all", async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', 'Failed to stop all processes', { error: err.message }, ctx);
             return reject(err);
@@ -1405,21 +1420,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, 'stop all processes');
   }
 
   async pm2Start(processName, ctx = null) {
     await this.logAuditWithCtx('PM2_START', `Starting process: ${processName}`, { processName }, ctx);
 
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for start: ${processName}`, { processName, error: err.message }, ctx);
-          return reject(err);
-        }
-
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.start(processName, async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', `Failed to start: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
@@ -1428,21 +1437,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, `start ${processName}`);
   }
 
   async pm2StartAll(ctx = null) {
     await this.logAuditWithCtx('PM2_START_ALL', 'Starting all processes', {}, ctx);
-
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for start all', { error: err.message }, ctx);
-          return reject(err);
-        }
-
+    
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.start("all", async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', 'Failed to start all processes', { error: err.message }, ctx);
             return reject(err);
@@ -1451,21 +1454,15 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, 'start all processes');
   }
 
   async pm2Reload(processName, ctx = null) {
     await this.logAuditWithCtx('PM2_RELOAD', `Reloading process: ${processName}`, { processName }, ctx);
 
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) {
-          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for reload: ${processName}`, { processName, error: err.message }, ctx);
-          return reject(err);
-        }
-
+    return this.safePM2Operation(() => {
+      return new Promise((resolve, reject) => {
         pm2.reload(processName, async (err) => {
-          pm2.disconnect();
           if (err) {
             await this.logAuditWithCtx('PM2_ERROR', `Failed to reload: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
@@ -1474,7 +1471,7 @@ class PM2TelegramBot {
           resolve();
         });
       });
-    });
+    }, `reload ${processName}`);
   }
 
   async getPM2Logs(processName, lines = 20) {
@@ -1562,7 +1559,41 @@ class PM2TelegramBot {
     return `${seconds}s`;
   }
 
+  async gracefulShutdown() {
+    console.log('🔄 Gracefully shutting down bot...');
+    
+    if (this.pm2Connected) {
+      try {
+        console.log('📡 Safely disconnecting from PM2...');
+        pm2.disconnect();
+        this.pm2Connected = false;
+        console.log('✅ PM2 disconnected safely');
+      } catch (error) {
+        console.error('❌ Error disconnecting from PM2:', error);
+      }
+    }
+    
+    if (this.auditLoggingEnabled) {
+      await this.logAudit('SYSTEM', 'Bot shutting down gracefully');
+    }
+    
+    console.log('✅ Bot shutdown complete');
+  }
+
   start() {
+    // Handle graceful shutdown
+    process.on('SIGINT', async () => {
+      console.log('\n🛑 Received SIGINT, shutting down gracefully...');
+      await this.gracefulShutdown();
+      process.exit(0);
+    });
+
+    process.on('SIGTERM', async () => {
+      console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
+      await this.gracefulShutdown();
+      process.exit(0);
+    });
+
     this.bot.start({
       onStart: (botInfo) => {
         console.log(`🤖 Bot @${botInfo.username} started successfully.`);
@@ -1575,6 +1606,7 @@ class PM2TelegramBot {
         console.log(
           `⚙️ CPU threshold: ${this.cpuThreshold}%, Memory threshold: ${this.memoryThreshold}MB`
         );
+        console.log(`🔒 PM2 connection: Safe connection pooling enabled`);
       },
     });
   }
