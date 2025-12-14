@@ -39,19 +39,19 @@ class PM2TelegramBot {
         .resized();
       
       ctx.reply(
-        '🤖 *PM2 Management Bot*\\n\\n' +
-        'Welcome, I can help you manage your PM2 processes\\.' +
-        '\\n\\nUse the buttons below or these commands:' +
-        '\\n• `/status` \\- Show all processes' +
-        '\\n• `/restart <name>` \\- Restart specific app' +
-        '\\n• `/stop <name>` \\- Stop specific app' +
-        '\\n• `/start <name>` \\- Start specific app' +
-        '\\n• `/reload <name>` \\- Reload specific app' +
-        '\\n• `/logs <name>` \\- Show app logs' +
-        '\\n• `/monitor` \\- Toggle monitoring' +
-        '\\n• `/help` \\- Show this help',
+        '🤖 <b>PM2 Management Bot</b>\n\n' +
+        'Welcome! I can help you manage your PM2 processes.\n\n' +
+        'Use the buttons below or these commands:\n' +
+        '• <code>/status</code> - Show all processes\n' +
+        '• <code>/restart &lt;name&gt;</code> - Restart specific app\n' +
+        '• <code>/stop &lt;name&gt;</code> - Stop specific app\n' +
+        '• <code>/start &lt;name&gt;</code> - Start specific app\n' +
+        '• <code>/reload &lt;name&gt;</code> - Reload specific app\n' +
+        '• <code>/logs &lt;name&gt;</code> - Show app logs\n' +
+        '• <code>/monitor</code> - Toggle monitoring\n' +
+        '• <code>/help</code> - Show this help',
         { 
-          parse_mode: 'MarkdownV2',
+          parse_mode: 'HTML',
           reply_markup: keyboard
         }
       );
@@ -103,7 +103,7 @@ class PM2TelegramBot {
         return ctx.reply('📭 No PM2 processes found.');
       }
 
-      let message = '📊 *PM2 Process Status*\\n\\n';
+      let message = '📊 <b>PM2 Process Status</b>\n\n';
       
       processes.forEach(proc => {
         const status = proc.pm2_env.status;
@@ -113,10 +113,10 @@ class PM2TelegramBot {
         const uptime = proc.pm2_env.pm_uptime ? this.formatUptime(Date.now() - proc.pm2_env.pm_uptime) : 'N/A';
         const restarts = proc.pm2_env.restart_time || 0;
 
-        message += `${statusIcon} *${proc.name}*\\n`;
-        message += `   Status: \`${status}\`\\n`;
-        message += `   CPU: \`${cpu}%\` \\| Memory: \`${memory}\`\\n`;
-        message += `   Uptime: \`${uptime}\` \\| Restarts: \`${restarts}\`\\n\\n`;
+        message += `${statusIcon} <b>${proc.name}</b>\n`;
+        message += `   Status: <code>${status}</code>\n`;
+        message += `   CPU: <code>${cpu}%</code> | Memory: <code>${memory}</code>\n`;
+        message += `   Uptime: <code>${uptime}</code> | Restarts: <code>${restarts}</code>\n\n`;
       });
 
       const keyboard = new InlineKeyboard()
@@ -124,7 +124,7 @@ class PM2TelegramBot {
         .text('📈 Details', 'detailed_status');
 
       ctx.reply(message, { 
-        parse_mode: 'MarkdownV2',
+        parse_mode: 'HTML',
         reply_markup: keyboard
       });
     } catch (error) {
@@ -287,8 +287,8 @@ class PM2TelegramBot {
         return ctx.reply(`📄 No recent logs found for "${processName}".`);
       }
 
-      const message = `📄 *Recent logs for ${processName}:*\n\n\`\`\`\n${logs.slice(-20).join('\n')}\n\`\`\``;
-      ctx.reply(message, { parse_mode: 'MarkdownV2' });
+      const message = `📄 <b>Recent logs for ${processName}:</b>\n\n<pre>${logs.slice(-20).join('\n')}</pre>`;
+      ctx.reply(message, { parse_mode: 'HTML' });
     } catch (error) {
       ctx.reply(`❌ Failed to get logs for "${processName}": ${error.message}`);
     }
@@ -308,7 +308,7 @@ class PM2TelegramBot {
         return ctx.reply('📈 No online processes to monitor.');
       }
 
-      let message = '📈 *Process Monitoring*\\n\\n';
+      let message = '📈 <b>Process Monitoring</b>\n\n';
       
       onlineProcesses.forEach(proc => {
         const cpu = proc.monit?.cpu || 0;
@@ -317,30 +317,30 @@ class PM2TelegramBot {
         const memoryMB = proc.monit?.memory ? Math.round(proc.monit.memory / 1024 / 1024) : 0;
         const memoryStatus = memoryMB > this.memoryThreshold ? '🔴' : memoryMB > 50 ? '🟡' : '🟢';
 
-        message += `*${proc.name}*\\n`;
-        message += `   CPU: ${cpuStatus} \`${cpu}%\`\\n`;
-        message += `   Memory: ${memoryStatus} \`${memory}\`\\n`;
-        message += `   PID: \`${proc.pid}\`\\n\\n`;
+        message += `<b>${proc.name}</b>\n`;
+        message += `   CPU: ${cpuStatus} <code>${cpu}%</code>\n`;
+        message += `   Memory: ${memoryStatus} <code>${memory}</code>\n`;
+        message += `   PID: <code>${proc.pid}</code>\n\n`;
       });
 
-      message += `\\n⚙️ *Thresholds:*\\n`;
-      message += `CPU: \`${this.cpuThreshold}%\` \\| Memory: \`${this.memoryThreshold}MB\``;
+      message += `\n⚙️ <b>Thresholds:</b>\n`;
+      message += `CPU: <code>${this.cpuThreshold}%</code> | Memory: <code>${this.memoryThreshold}MB</code>`;
 
-      ctx.reply(message, { parse_mode: 'MarkdownV2' });
+      ctx.reply(message, { parse_mode: 'HTML' });
     } catch (error) {
       ctx.reply(`❌ Error getting monitoring status: ${error.message}`);
     }
   }
 
   async showSettings(ctx) {
-    const message = `⚙️ *Bot Settings*\\n\\n` +
-      `Monitor Interval: \`${this.monitorInterval / 1000}s\`\\n` +
-      `CPU Threshold: \`${this.cpuThreshold}%\`\\n` +
-      `Memory Threshold: \`${this.memoryThreshold}MB\`\\n` +
-      `Restart Threshold: \`${this.restartThreshold}\`\\n\\n` +
-      `Authorized Users: \`${this.authorizedUsers.length}\``;
+    const message = `⚙️ <b>Bot Settings</b>\n\n` +
+      `Monitor Interval: <code>${this.monitorInterval / 1000}s</code>\n` +
+      `CPU Threshold: <code>${this.cpuThreshold}%</code>\n` +
+      `Memory Threshold: <code>${this.memoryThreshold}MB</code>\n` +
+      `Restart Threshold: <code>${this.restartThreshold}</code>\n\n` +
+      `Authorized Users: <code>${this.authorizedUsers.length}</code>`;
 
-    ctx.reply(message, { parse_mode: 'MarkdownV2' });
+    ctx.reply(message, { parse_mode: 'HTML' });
   }
 
   async handleCallbackQuery(ctx) {
@@ -399,25 +399,25 @@ class PM2TelegramBot {
         return ctx.reply('📭 No PM2 processes found.');
       }
 
-      let message = '📊 *Detailed Process Status*\\n\\n';
+      let message = '📊 <b>Detailed Process Status</b>\n\n';
       
       processes.forEach(proc => {
         const env = proc.pm2_env;
         const status = env.status;
         const statusIcon = status === 'online' ? '🟢' : status === 'stopped' ? '🔴' : '🟡';
         
-        message += `${statusIcon} *${proc.name}* \\(ID: ${proc.pm_id}\\)\\n`;
-        message += `   Status: \`${status}\`\\n`;
-        message += `   PID: \`${proc.pid || 'N/A'}\`\\n`;
-        message += `   CPU: \`${proc.monit?.cpu || 0}%\`\\n`;
-        message += `   Memory: \`${proc.monit?.memory ? this.formatBytes(proc.monit.memory) : '0 MB'}\`\\n`;
-        message += `   Uptime: \`${env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : 'N/A'}\`\\n`;
-        message += `   Restarts: \`${env.restart_time || 0}\`\\n`;
-        message += `   Script: \`${env.pm_exec_path || 'N/A'}\`\\n`;
-        message += `   Mode: \`${env.exec_mode || 'N/A'}\`\\n\\n`;
+        message += `${statusIcon} <b>${proc.name}</b> (ID: ${proc.pm_id})\n`;
+        message += `   Status: <code>${status}</code>\n`;
+        message += `   PID: <code>${proc.pid || 'N/A'}</code>\n`;
+        message += `   CPU: <code>${proc.monit?.cpu || 0}%</code>\n`;
+        message += `   Memory: <code>${proc.monit?.memory ? this.formatBytes(proc.monit.memory) : '0 MB'}</code>\n`;
+        message += `   Uptime: <code>${env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : 'N/A'}</code>\n`;
+        message += `   Restarts: <code>${env.restart_time || 0}</code>\n`;
+        message += `   Script: <code>${env.pm_exec_path || 'N/A'}</code>\n`;
+        message += `   Mode: <code>${env.exec_mode || 'N/A'}</code>\n\n`;
       });
 
-      ctx.reply(message, { parse_mode: 'MarkdownV2' });
+      ctx.reply(message, { parse_mode: 'HTML' });
     } catch (error) {
       ctx.reply(`❌ Error getting detailed status: ${error.message}`);
     }
@@ -498,8 +498,8 @@ class PM2TelegramBot {
     // Send alert to all authorized users
     for (const userId of this.authorizedUsers) {
       try {
-        await this.bot.api.sendMessage(userId, `🚨 *PM2 Alert*\\n\\n${message}`, { 
-          parse_mode: 'MarkdownV2' 
+        await this.bot.api.sendMessage(userId, `🚨 <b>PM2 Alert</b>\n\n${message}`, { 
+          parse_mode: 'HTML' 
         });
       } catch (error) {
         console.error(`Failed to send alert to user ${userId}:`, error);
