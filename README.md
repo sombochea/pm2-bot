@@ -27,7 +27,7 @@ A comprehensive Telegram bot for managing PM2 processes with real-time monitorin
 
 1. **Clone and install dependencies:**
 ```bash
-git clone <repository-url>
+git clone https://github.com/sombochea/pm2-bot.git
 cd pm2-telegram-bot
 npm install
 ```
@@ -156,4 +156,4 @@ The bot logs important events to the console. For production, consider using a l
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License
