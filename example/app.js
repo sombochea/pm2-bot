@@ -3,6 +3,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
+  console.log('Request from', JSON.stringify(req.headers))
   res.json({
     message: 'Hello World!',
     timestamp: new Date().toISOString(),

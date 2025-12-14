@@ -1,18 +1,21 @@
-const { Bot, Keyboard, InlineKeyboard } = require('grammy');
-const pm2 = require('pm2');
-const cron = require('node-cron');
-require('dotenv').config();
+require("dotenv").config();
+
+const { Bot, Keyboard, InlineKeyboard } = require("grammy");
+const pm2 = require("pm2");
+const cron = require("node-cron");
+const { exec } = require("child_process");
 
 class PM2TelegramBot {
   constructor() {
     this.bot = new Bot(process.env.BOT_TOKEN);
-    this.authorizedUsers = process.env.AUTHORIZED_USERS?.split(',').map(id => parseInt(id)) || [];
+    this.authorizedUsers =
+      process.env.AUTHORIZED_USERS?.split(",").map((id) => parseInt(id)) || [];
     this.monitorInterval = parseInt(process.env.MONITOR_INTERVAL) || 30000;
     this.cpuThreshold = parseInt(process.env.CPU_THRESHOLD) || 80;
     this.memoryThreshold = parseInt(process.env.MEMORY_THRESHOLD) || 80;
     this.restartThreshold = parseInt(process.env.RESTART_THRESHOLD) || 5;
     this.restartCounts = new Map();
-    
+
     this.setupCommands();
     this.setupMiddleware();
     this.startMonitoring();
@@ -21,96 +24,112 @@ class PM2TelegramBot {
   setupMiddleware() {
     // Authorization middleware
     this.bot.use((ctx, next) => {
-      if (this.authorizedUsers.length === 0 || this.authorizedUsers.includes(ctx.from?.id) || this.authorizedUsers.includes(ctx.from?.username)) {
+      if (
+        this.authorizedUsers.length === 0 ||
+        this.authorizedUsers.includes(ctx.from?.id) ||
+        this.authorizedUsers.includes(ctx.from?.username)
+      ) {
         return next();
       }
-      console.log('Unauthorized from chat', ctx.from)
-      return ctx.reply('❌ Unauthorized access. Contact the administrator.');
+      console.log("Unauthorized from chat", ctx.from);
+      return ctx.reply("❌ Unauthorized access. Contact the administrator.");
     });
   }
 
   setupCommands() {
     // Start command
-    this.bot.command('start', (ctx) => {
+    this.bot.command("start", (ctx) => {
       const keyboard = new Keyboard()
-        .text('📊 Status').text('🔄 Restart All').row()
-        .text('⏹️ Stop All').text('▶️ Start All').row()
-        .text('📈 Monitor').text('⚙️ Settings')
+        .text("📊 Status")
+        .text("🔄 Restart All")
+        .row()
+        .text("⏹️ Stop All")
+        .text("▶️ Start All")
+        .row()
+        .text("📈 Monitor")
+        .text("⚙️ Settings")
         .resized();
-      
+
       ctx.reply(
-        '🤖 <b>PM2 Management Bot</b>\n\n' +
-        'Welcome! I can help you manage your PM2 processes.\n\n' +
-        'Use the buttons below or these commands:\n' +
-        '• <code>/status</code> - Show all processes\n' +
-        '• <code>/restart &lt;name&gt;</code> - Restart specific app\n' +
-        '• <code>/stop &lt;name&gt;</code> - Stop specific app\n' +
-        '• <code>/start &lt;name&gt;</code> - Start specific app\n' +
-        '• <code>/reload &lt;name&gt;</code> - Reload specific app\n' +
-        '• <code>/logs &lt;name&gt;</code> - Show app logs\n' +
-        '• <code>/monitor</code> - Toggle monitoring\n' +
-        '• <code>/help</code> - Show this help',
-        { 
-          parse_mode: 'HTML',
-          reply_markup: keyboard
+        "🤖 <b>PM2 Management Bot</b>\n\n" +
+          "Welcome! I can help you manage your PM2 processes.\n\n" +
+          "Use the buttons below or these commands:\n" +
+          "• <code>/status</code> - Show all processes\n" +
+          "• <code>/restart &lt;name&gt;</code> - Restart specific app\n" +
+          "• <code>/stop &lt;name&gt;</code> - Stop specific app\n" +
+          "• <code>/start &lt;name&gt;</code> - Start specific app\n" +
+          "• <code>/reload &lt;name&gt;</code> - Reload specific app\n" +
+          "• <code>/logs &lt;name&gt;</code> - Show app logs\n" +
+          "• <code>/monitor</code> - Toggle monitoring\n" +
+          "• <code>/help</code> - Show this help",
+        {
+          parse_mode: "HTML",
+          reply_markup: keyboard,
         }
       );
     });
 
     // Help command
-    this.bot.command('help', (ctx) => this.bot.api.sendMessage(ctx.chat.id, '/start'));
+    this.bot.command("help", (ctx) =>
+      this.bot.api.sendMessage(ctx.chat.id, "/start")
+    );
 
     // Status command
-    this.bot.command('status', (ctx) => this.getProcessStatus(ctx));
-    this.bot.hears('📊 Status', (ctx) => this.getProcessStatus(ctx));
+    this.bot.command("status", (ctx) => this.getProcessStatus(ctx));
+    this.bot.hears("📊 Status", (ctx) => this.getProcessStatus(ctx));
 
     // Restart commands
-    this.bot.command('restart', (ctx) => this.restartProcess(ctx));
-    this.bot.command('restartall', (ctx) => this.restartAllProcesses(ctx));
-    this.bot.hears('🔄 Restart All', (ctx) => this.restartAllProcesses(ctx));
+    this.bot.command("restart", (ctx) => this.restartProcess(ctx));
+    this.bot.command("restartall", (ctx) => this.restartAllProcesses(ctx));
+    this.bot.hears("🔄 Restart All", (ctx) => this.restartAllProcesses(ctx));
 
     // Stop commands
-    this.bot.command('stop', (ctx) => this.stopProcess(ctx));
-    this.bot.command('stopall', (ctx) => this.stopAllProcesses(ctx));
-    this.bot.hears('⏹️ Stop All', (ctx) => this.stopAllProcesses(ctx));
+    this.bot.command("stop", (ctx) => this.stopProcess(ctx));
+    this.bot.command("stopall", (ctx) => this.stopAllProcesses(ctx));
+    this.bot.hears("⏹️ Stop All", (ctx) => this.stopAllProcesses(ctx));
 
     // Start commands
-    this.bot.command('start', (ctx) => this.startProcess(ctx));
-    this.bot.command('startall', (ctx) => this.startAllProcesses(ctx));
-    this.bot.hears('▶️ Start All', (ctx) => this.startAllProcesses(ctx));
+    this.bot.command("start", (ctx) => this.startProcess(ctx));
+    this.bot.command("startall", (ctx) => this.startAllProcesses(ctx));
+    this.bot.hears("▶️ Start All", (ctx) => this.startAllProcesses(ctx));
 
     // Reload command
-    this.bot.command('reload', (ctx) => this.reloadProcess(ctx));
+    this.bot.command("reload", (ctx) => this.reloadProcess(ctx));
 
     // Logs command
-    this.bot.command('logs', (ctx) => this.getProcessLogs(ctx));
+    this.bot.command("logs", (ctx) => this.getProcessLogs(ctx));
 
     // Monitor command
-    this.bot.command('monitor', (ctx) => this.toggleMonitoring(ctx));
-    this.bot.hears('📈 Monitor', (ctx) => this.getMonitoringStatus(ctx));
+    this.bot.command("monitor", (ctx) => this.toggleMonitoring(ctx));
+    this.bot.hears("📈 Monitor", (ctx) => this.getMonitoringStatus(ctx));
 
     // Settings
-    this.bot.hears('⚙️ Settings', (ctx) => this.showSettings(ctx));
+    this.bot.hears("⚙️ Settings", (ctx) => this.showSettings(ctx));
 
     // Callback query handlers
-    this.bot.on('callback_query', (ctx) => this.handleCallbackQuery(ctx));
+    this.bot.on("callback_query", (ctx) => this.handleCallbackQuery(ctx));
   }
   async getProcessStatus(ctx) {
     try {
       const processes = await this.getPM2Processes();
-      
+
       if (processes.length === 0) {
-        return ctx.reply('📭 No PM2 processes found.');
+        return ctx.reply("📭 No PM2 processes found.");
       }
 
-      let message = '📊 <b>PM2 Process Status</b>\n\n';
-      
-      processes.forEach(proc => {
+      let message = "📊 <b>PM2 Process Status</b>\n\n";
+
+      processes.forEach((proc) => {
         const status = proc.pm2_env.status;
-        const statusIcon = status === 'online' ? '🟢' : status === 'stopped' ? '🔴' : '🟡';
+        const statusIcon =
+          status === "online" ? "🟢" : status === "stopped" ? "🔴" : "🟡";
         const cpu = proc.monit?.cpu || 0;
-        const memory = proc.monit?.memory ? this.formatBytes(proc.monit.memory) : '0 MB';
-        const uptime = proc.pm2_env.pm_uptime ? this.formatUptime(Date.now() - proc.pm2_env.pm_uptime) : 'N/A';
+        const memory = proc.monit?.memory
+          ? this.formatBytes(proc.monit.memory)
+          : "0 MB";
+        const uptime = proc.pm2_env.pm_uptime
+          ? this.formatUptime(Date.now() - proc.pm2_env.pm_uptime)
+          : "N/A";
         const restarts = proc.pm2_env.restart_time || 0;
 
         message += `${statusIcon} <b>${proc.name}</b>\n`;
@@ -121,13 +140,13 @@ class PM2TelegramBot {
 
       // Create keyboard with individual app controls
       const keyboard = new InlineKeyboard();
-      
+
       // Add individual app controls
-      processes.forEach(proc => {
+      processes.forEach((proc) => {
         const status = proc.pm2_env.status;
         const name = proc.name;
-        
-        if (status === 'online') {
+
+        if (status === "online") {
           // For online processes: restart, reload, stop, logs
           keyboard
             .text(`🔄 ${name}`, `restart_${name}`)
@@ -147,15 +166,15 @@ class PM2TelegramBot {
 
       // Add general controls
       keyboard
-        .text('🔄 Refresh', 'refresh_status')
-        .text('📈 Details', 'detailed_status')
+        .text("🔄 Refresh", "refresh_status")
+        .text("📈 Details", "detailed_status")
         .row()
-        .text('🔄 Restart All', 'restart_all')
-        .text('⏹️ Stop All', 'stop_all');
+        .text("🔄 Restart All", "restart_all")
+        .text("⏹️ Stop All", "stop_all");
 
-      ctx.reply(message, { 
-        parse_mode: 'HTML',
-        reply_markup: keyboard
+      ctx.reply(message, {
+        parse_mode: "HTML",
+        reply_markup: keyboard,
       });
     } catch (error) {
       ctx.reply(`❌ Error getting process status: ${error.message}`);
@@ -164,19 +183,21 @@ class PM2TelegramBot {
 
   async restartProcess(ctx) {
     const processName = ctx.match?.trim();
-    
+
     if (!processName) {
       const processes = await this.getPM2Processes();
       if (processes.length === 0) {
-        return ctx.reply('📭 No processes available to restart.');
+        return ctx.reply("📭 No processes available to restart.");
       }
 
       const keyboard = new InlineKeyboard();
-      processes.forEach(proc => {
+      processes.forEach((proc) => {
         keyboard.text(`🔄 ${proc.name}`, `restart_${proc.name}`).row();
       });
 
-      return ctx.reply('🔄 Select a process to restart:', { reply_markup: keyboard });
+      return ctx.reply("🔄 Select a process to restart:", {
+        reply_markup: keyboard,
+      });
     }
 
     try {
@@ -190,7 +211,7 @@ class PM2TelegramBot {
   async restartAllProcesses(ctx) {
     try {
       await this.pm2RestartAll();
-      ctx.reply('✅ All processes restarted successfully.');
+      ctx.reply("✅ All processes restarted successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to restart all processes: ${error.message}`);
     }
@@ -198,21 +219,25 @@ class PM2TelegramBot {
 
   async stopProcess(ctx) {
     const processName = ctx.match?.trim();
-    
+
     if (!processName) {
       const processes = await this.getPM2Processes();
-      const runningProcesses = processes.filter(p => p.pm2_env.status === 'online');
-      
+      const runningProcesses = processes.filter(
+        (p) => p.pm2_env.status === "online"
+      );
+
       if (runningProcesses.length === 0) {
-        return ctx.reply('📭 No running processes to stop.');
+        return ctx.reply("📭 No running processes to stop.");
       }
 
       const keyboard = new InlineKeyboard();
-      runningProcesses.forEach(proc => {
+      runningProcesses.forEach((proc) => {
         keyboard.text(`⏹️ ${proc.name}`, `stop_${proc.name}`).row();
       });
 
-      return ctx.reply('⏹️ Select a process to stop:', { reply_markup: keyboard });
+      return ctx.reply("⏹️ Select a process to stop:", {
+        reply_markup: keyboard,
+      });
     }
 
     try {
@@ -226,7 +251,7 @@ class PM2TelegramBot {
   async stopAllProcesses(ctx) {
     try {
       await this.pm2StopAll();
-      ctx.reply('✅ All processes stopped successfully.');
+      ctx.reply("✅ All processes stopped successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to stop all processes: ${error.message}`);
     }
@@ -234,21 +259,25 @@ class PM2TelegramBot {
 
   async startProcess(ctx) {
     const processName = ctx.match?.trim();
-    
+
     if (!processName) {
       const processes = await this.getPM2Processes();
-      const stoppedProcesses = processes.filter(p => p.pm2_env.status === 'stopped');
-      
+      const stoppedProcesses = processes.filter(
+        (p) => p.pm2_env.status === "stopped"
+      );
+
       if (stoppedProcesses.length === 0) {
-        return ctx.reply('📭 No stopped processes to start.');
+        return ctx.reply("📭 No stopped processes to start.");
       }
 
       const keyboard = new InlineKeyboard();
-      stoppedProcesses.forEach(proc => {
+      stoppedProcesses.forEach((proc) => {
         keyboard.text(`▶️ ${proc.name}`, `start_${proc.name}`).row();
       });
 
-      return ctx.reply('▶️ Select a process to start:', { reply_markup: keyboard });
+      return ctx.reply("▶️ Select a process to start:", {
+        reply_markup: keyboard,
+      });
     }
 
     try {
@@ -262,7 +291,7 @@ class PM2TelegramBot {
   async startAllProcesses(ctx) {
     try {
       await this.pm2StartAll();
-      ctx.reply('✅ All processes started successfully.');
+      ctx.reply("✅ All processes started successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to start all processes: ${error.message}`);
     }
@@ -270,21 +299,25 @@ class PM2TelegramBot {
 
   async reloadProcess(ctx) {
     const processName = ctx.match?.trim();
-    
+
     if (!processName) {
       const processes = await this.getPM2Processes();
-      const onlineProcesses = processes.filter(p => p.pm2_env.status === 'online');
-      
+      const onlineProcesses = processes.filter(
+        (p) => p.pm2_env.status === "online"
+      );
+
       if (onlineProcesses.length === 0) {
-        return ctx.reply('📭 No online processes to reload.');
+        return ctx.reply("📭 No online processes to reload.");
       }
 
       const keyboard = new InlineKeyboard();
-      onlineProcesses.forEach(proc => {
+      onlineProcesses.forEach((proc) => {
         keyboard.text(`🔄 ${proc.name}`, `reload_${proc.name}`).row();
       });
 
-      return ctx.reply('🔄 Select a process to reload:', { reply_markup: keyboard });
+      return ctx.reply("🔄 Select a process to reload:", {
+        reply_markup: keyboard,
+      });
     }
 
     try {
@@ -296,19 +329,21 @@ class PM2TelegramBot {
   }
   async getProcessLogs(ctx) {
     const processName = ctx.match?.trim();
-    
+
     if (!processName) {
       const processes = await this.getPM2Processes();
       if (processes.length === 0) {
-        return ctx.reply('📭 No processes available.');
+        return ctx.reply("📭 No processes available.");
       }
 
       const keyboard = new InlineKeyboard();
-      processes.forEach(proc => {
+      processes.forEach((proc) => {
         keyboard.text(`📄 ${proc.name}`, `logs_${proc.name}`).row();
       });
 
-      return ctx.reply('📄 Select a process to view logs:', { reply_markup: keyboard });
+      return ctx.reply("📄 Select a process to view logs:", {
+        reply_markup: keyboard,
+      });
     }
 
     try {
@@ -317,8 +352,12 @@ class PM2TelegramBot {
         return ctx.reply(`📄 No recent logs found for "${processName}".`);
       }
 
-      const message = `📄 <b>Recent logs for ${processName}:</b>\n\n<pre>${logs.slice(-20).join('\n')}</pre>`;
-      ctx.reply(message, { parse_mode: 'HTML' });
+      console.log("Logs", processName, logs);
+
+      const message = `📄 <b>Recent logs for ${processName}:</b>\n\n<pre>${logs
+        .slice(-20)
+        .join("\n")}</pre>`;
+      ctx.reply(message, { parse_mode: "HTML" });
     } catch (error) {
       ctx.reply(`❌ Failed to get logs for "${processName}": ${error.message}`);
     }
@@ -326,26 +365,36 @@ class PM2TelegramBot {
 
   async toggleMonitoring(ctx) {
     // This would toggle monitoring on/off
-    ctx.reply('📈 Monitoring is currently active. Use /monitor to check status.');
+    ctx.reply(
+      "📈 Monitoring is currently active. Use /monitor to check status."
+    );
   }
 
   async getMonitoringStatus(ctx) {
     try {
       const processes = await this.getPM2Processes();
-      const onlineProcesses = processes.filter(p => p.pm2_env.status === 'online');
-      
+      const onlineProcesses = processes.filter(
+        (p) => p.pm2_env.status === "online"
+      );
+
       if (onlineProcesses.length === 0) {
-        return ctx.reply('📈 No online processes to monitor.');
+        return ctx.reply("📈 No online processes to monitor.");
       }
 
-      let message = '📈 <b>Process Monitoring</b>\n\n';
-      
-      onlineProcesses.forEach(proc => {
+      let message = "📈 <b>Process Monitoring</b>\n\n";
+
+      onlineProcesses.forEach((proc) => {
         const cpu = proc.monit?.cpu || 0;
-        const memory = proc.monit?.memory ? this.formatBytes(proc.monit.memory) : '0 MB';
-        const cpuStatus = cpu > this.cpuThreshold ? '🔴' : cpu > 50 ? '🟡' : '🟢';
-        const memoryMB = proc.monit?.memory ? Math.round(proc.monit.memory / 1024 / 1024) : 0;
-        const memoryStatus = memoryMB > this.memoryThreshold ? '🔴' : memoryMB > 50 ? '🟡' : '🟢';
+        const memory = proc.monit?.memory
+          ? this.formatBytes(proc.monit.memory)
+          : "0 MB";
+        const cpuStatus =
+          cpu > this.cpuThreshold ? "🔴" : cpu > 50 ? "🟡" : "🟢";
+        const memoryMB = proc.monit?.memory
+          ? Math.round(proc.monit.memory / 1024 / 1024)
+          : 0;
+        const memoryStatus =
+          memoryMB > this.memoryThreshold ? "🔴" : memoryMB > 50 ? "🟡" : "🟢";
 
         message += `<b>${proc.name}</b>\n`;
         message += `   CPU: ${cpuStatus} <code>${cpu}%</code>\n`;
@@ -356,32 +405,33 @@ class PM2TelegramBot {
       message += `\n⚙️ <b>Thresholds:</b>\n`;
       message += `CPU: <code>${this.cpuThreshold}%</code> | Memory: <code>${this.memoryThreshold}MB</code>`;
 
-      ctx.reply(message, { parse_mode: 'HTML' });
+      ctx.reply(message, { parse_mode: "HTML" });
     } catch (error) {
       ctx.reply(`❌ Error getting monitoring status: ${error.message}`);
     }
   }
 
   async showSettings(ctx) {
-    const message = `⚙️ <b>Bot Settings</b>\n\n` +
+    const message =
+      `⚙️ <b>Bot Settings</b>\n\n` +
       `Monitor Interval: <code>${this.monitorInterval / 1000}s</code>\n` +
       `CPU Threshold: <code>${this.cpuThreshold}%</code>\n` +
       `Memory Threshold: <code>${this.memoryThreshold}MB</code>\n` +
       `Restart Threshold: <code>${this.restartThreshold}</code>\n\n` +
       `Authorized Users: <code>${this.authorizedUsers.length}</code>`;
 
-    ctx.reply(message, { parse_mode: 'HTML' });
+    ctx.reply(message, { parse_mode: "HTML" });
   }
 
   async handleCallbackQuery(ctx) {
     const data = ctx.callbackQuery.data;
-    
-    if (data === 'refresh_status') {
+
+    if (data === "refresh_status") {
       await this.getProcessStatus(ctx);
-    } else if (data === 'detailed_status') {
+    } else if (data === "detailed_status") {
       await this.getDetailedStatus(ctx);
-    } else if (data.startsWith('restart_')) {
-      const processName = data.replace('restart_', '');
+    } else if (data.startsWith("restart_")) {
+      const processName = data.replace("restart_", "");
       try {
         await this.pm2Restart(processName);
         ctx.answerCallbackQuery(`✅ ${processName} restarted`);
@@ -389,8 +439,8 @@ class PM2TelegramBot {
       } catch (error) {
         ctx.answerCallbackQuery(`❌ Failed to restart ${processName}`);
       }
-    } else if (data.startsWith('stop_')) {
-      const processName = data.replace('stop_', '');
+    } else if (data.startsWith("stop_")) {
+      const processName = data.replace("stop_", "");
       try {
         await this.pm2Stop(processName);
         ctx.answerCallbackQuery(`✅ ${processName} stopped`);
@@ -398,8 +448,8 @@ class PM2TelegramBot {
       } catch (error) {
         ctx.answerCallbackQuery(`❌ Failed to stop ${processName}`);
       }
-    } else if (data.startsWith('start_')) {
-      const processName = data.replace('start_', '');
+    } else if (data.startsWith("start_")) {
+      const processName = data.replace("start_", "");
       try {
         await this.pm2Start(processName);
         ctx.answerCallbackQuery(`✅ ${processName} started`);
@@ -407,8 +457,8 @@ class PM2TelegramBot {
       } catch (error) {
         ctx.answerCallbackQuery(`❌ Failed to start ${processName}`);
       }
-    } else if (data.startsWith('reload_')) {
-      const processName = data.replace('reload_', '');
+    } else if (data.startsWith("reload_")) {
+      const processName = data.replace("reload_", "");
       try {
         await this.pm2Reload(processName);
         ctx.answerCallbackQuery(`✅ ${processName} reloaded`);
@@ -416,54 +466,62 @@ class PM2TelegramBot {
       } catch (error) {
         ctx.answerCallbackQuery(`❌ Failed to reload ${processName}`);
       }
-    } else if (data.startsWith('logs_')) {
-      const processName = data.replace('logs_', '');
-      await this.getProcessLogs({ match: processName, reply: ctx.reply.bind(ctx) });
-    } else if (data === 'restart_all') {
+    } else if (data.startsWith("logs_")) {
+      const processName = data.replace("logs_", "");
+      await this.getProcessLogs({
+        match: processName,
+        reply: ctx.reply.bind(ctx),
+      });
+    } else if (data === "restart_all") {
       try {
         await this.pm2RestartAll();
-        ctx.answerCallbackQuery('✅ All processes restarted');
+        ctx.answerCallbackQuery("✅ All processes restarted");
         await this.getProcessStatus(ctx);
       } catch (error) {
-        ctx.answerCallbackQuery('❌ Failed to restart all processes');
+        ctx.answerCallbackQuery("❌ Failed to restart all processes");
       }
-    } else if (data === 'stop_all') {
+    } else if (data === "stop_all") {
       try {
         await this.pm2StopAll();
-        ctx.answerCallbackQuery('✅ All processes stopped');
+        ctx.answerCallbackQuery("✅ All processes stopped");
         await this.getProcessStatus(ctx);
       } catch (error) {
-        ctx.answerCallbackQuery('❌ Failed to stop all processes');
+        ctx.answerCallbackQuery("❌ Failed to stop all processes");
       }
     }
   }
   async getDetailedStatus(ctx) {
     try {
       const processes = await this.getPM2Processes();
-      
+
       if (processes.length === 0) {
-        return ctx.reply('📭 No PM2 processes found.');
+        return ctx.reply("📭 No PM2 processes found.");
       }
 
-      let message = '📊 <b>Detailed Process Status</b>\n\n';
-      
-      processes.forEach(proc => {
+      let message = "📊 <b>Detailed Process Status</b>\n\n";
+
+      processes.forEach((proc) => {
         const env = proc.pm2_env;
         const status = env.status;
-        const statusIcon = status === 'online' ? '🟢' : status === 'stopped' ? '🔴' : '🟡';
-        
+        const statusIcon =
+          status === "online" ? "🟢" : status === "stopped" ? "🔴" : "🟡";
+
         message += `${statusIcon} <b>${proc.name}</b> (ID: ${proc.pm_id})\n`;
         message += `   Status: <code>${status}</code>\n`;
-        message += `   PID: <code>${proc.pid || 'N/A'}</code>\n`;
+        message += `   PID: <code>${proc.pid || "N/A"}</code>\n`;
         message += `   CPU: <code>${proc.monit?.cpu || 0}%</code>\n`;
-        message += `   Memory: <code>${proc.monit?.memory ? this.formatBytes(proc.monit.memory) : '0 MB'}</code>\n`;
-        message += `   Uptime: <code>${env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : 'N/A'}</code>\n`;
+        message += `   Memory: <code>${
+          proc.monit?.memory ? this.formatBytes(proc.monit.memory) : "0 MB"
+        }</code>\n`;
+        message += `   Uptime: <code>${
+          env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : "N/A"
+        }</code>\n`;
         message += `   Restarts: <code>${env.restart_time || 0}</code>\n`;
-        message += `   Script: <code>${env.pm_exec_path || 'N/A'}</code>\n`;
-        message += `   Mode: <code>${env.exec_mode || 'N/A'}</code>\n\n`;
+        message += `   Script: <code>${env.pm_exec_path || "N/A"}</code>\n`;
+        message += `   Mode: <code>${env.exec_mode || "N/A"}</code>\n\n`;
       });
 
-      ctx.reply(message, { parse_mode: 'HTML' });
+      ctx.reply(message, { parse_mode: "HTML" });
     } catch (error) {
       ctx.reply(`❌ Error getting detailed status: ${error.message}`);
     }
@@ -475,31 +533,41 @@ class PM2TelegramBot {
       try {
         await this.checkProcessHealth();
       } catch (error) {
-        console.error('Monitoring error:', error);
+        console.error("Monitoring error:", error);
       }
     }, this.monitorInterval);
 
-    console.log(`🔍 Monitoring started with ${this.monitorInterval / 1000}s interval`);
+    console.log(
+      `🔍 Monitoring started with ${this.monitorInterval / 1000}s interval`
+    );
   }
 
   async checkProcessHealth() {
     try {
       const processes = await this.getPM2Processes();
-      const onlineProcesses = processes.filter(p => p.pm2_env.status === 'online');
+      const onlineProcesses = processes.filter(
+        (p) => p.pm2_env.status === "online"
+      );
 
       for (const proc of onlineProcesses) {
         const cpu = proc.monit?.cpu || 0;
-        const memoryMB = proc.monit?.memory ? Math.round(proc.monit.memory / 1024 / 1024) : 0;
+        const memoryMB = proc.monit?.memory
+          ? Math.round(proc.monit.memory / 1024 / 1024)
+          : 0;
         const processName = proc.name;
 
         // Check for high CPU usage
         if (cpu > this.cpuThreshold) {
-          await this.sendAlert(`🔴 High CPU Alert: ${processName} is using ${cpu}% CPU`);
+          await this.sendAlert(
+            `🔴 High CPU Alert: ${processName} is using ${cpu}% CPU`
+          );
         }
 
         // Check for high memory usage
         if (memoryMB > this.memoryThreshold) {
-          await this.sendAlert(`🔴 High Memory Alert: ${processName} is using ${memoryMB}MB memory`);
+          await this.sendAlert(
+            `🔴 High Memory Alert: ${processName} is using ${memoryMB}MB memory`
+          );
         }
 
         // Check for stuck processes (not responding)
@@ -508,7 +576,7 @@ class PM2TelegramBot {
         }
       }
     } catch (error) {
-      console.error('Health check error:', error);
+      console.error("Health check error:", error);
     }
   }
 
@@ -516,9 +584,9 @@ class PM2TelegramBot {
     // Simple heuristic: if CPU is 0 for extended period and should be active
     const cpu = proc.monit?.cpu || 0;
     const uptime = Date.now() - proc.pm2_env.pm_uptime;
-    
+
     // If process has been running for more than 5 minutes with 0% CPU consistently
-    return uptime > 300000 && cpu === 0 && proc.pm2_env.status === 'online';
+    return uptime > 300000 && cpu === 0 && proc.pm2_env.status === "online";
   }
 
   async handleStuckProcess(proc) {
@@ -529,12 +597,20 @@ class PM2TelegramBot {
       try {
         await this.pm2Restart(processName);
         this.restartCounts.set(processName, currentCount + 1);
-        await this.sendAlert(`🔄 Auto-restarted stuck process: ${processName} (attempt ${currentCount + 1}/${this.restartThreshold})`);
+        await this.sendAlert(
+          `🔄 Auto-restarted stuck process: ${processName} (attempt ${
+            currentCount + 1
+          }/${this.restartThreshold})`
+        );
       } catch (error) {
-        await this.sendAlert(`❌ Failed to auto-restart ${processName}: ${error.message}`);
+        await this.sendAlert(
+          `❌ Failed to auto-restart ${processName}: ${error.message}`
+        );
       }
     } else {
-      await this.sendAlert(`⚠️ Process ${processName} has been restarted ${this.restartThreshold} times. Manual intervention required.`);
+      await this.sendAlert(
+        `⚠️ Process ${processName} has been restarted ${this.restartThreshold} times. Manual intervention required.`
+      );
       // Reset counter after reaching threshold
       this.restartCounts.set(processName, 0);
     }
@@ -544,9 +620,13 @@ class PM2TelegramBot {
     // Send alert to all authorized users
     for (const userId of this.authorizedUsers) {
       try {
-        await this.bot.api.sendMessage(userId, `🚨 <b>PM2 Alert</b>\n\n${message}`, { 
-          parse_mode: 'HTML' 
-        });
+        await this.bot.api.sendMessage(
+          userId,
+          `🚨 <b>PM2 Alert</b>\n\n${message}`,
+          {
+            parse_mode: "HTML",
+          }
+        );
       } catch (error) {
         console.error(`Failed to send alert to user ${userId}:`, error);
       }
@@ -557,7 +637,7 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
+
         pm2.list((err, processes) => {
           pm2.disconnect();
           if (err) return reject(err);
@@ -571,7 +651,7 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
+
         pm2.restart(processName, (err) => {
           pm2.disconnect();
           if (err) return reject(err);
@@ -585,8 +665,8 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
-        pm2.restart('all', (err) => {
+
+        pm2.restart("all", (err) => {
           pm2.disconnect();
           if (err) return reject(err);
           resolve();
@@ -599,7 +679,7 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
+
         pm2.stop(processName, (err) => {
           pm2.disconnect();
           if (err) return reject(err);
@@ -613,8 +693,8 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
-        pm2.stop('all', (err) => {
+
+        pm2.stop("all", (err) => {
           pm2.disconnect();
           if (err) return reject(err);
           resolve();
@@ -627,7 +707,7 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
+
         pm2.start(processName, (err) => {
           pm2.disconnect();
           if (err) return reject(err);
@@ -641,8 +721,8 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
-        pm2.start('all', (err) => {
+
+        pm2.start("all", (err) => {
           pm2.disconnect();
           if (err) return reject(err);
           resolve();
@@ -655,7 +735,7 @@ class PM2TelegramBot {
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) return reject(err);
-        
+
         pm2.reload(processName, (err) => {
           pm2.disconnect();
           if (err) return reject(err);
@@ -666,25 +746,16 @@ class PM2TelegramBot {
   }
 
   async getPM2Logs(processName) {
-    // This is a simplified version - in production you might want to read actual log files
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) return reject(err);
-        
-        // PM2 doesn't have a direct logs API, so we'll return a placeholder
-        pm2.disconnect();
-        resolve([`[${new Date().toISOString()}] Log entry for ${processName}`]);
-      });
-    });
+    // TODO: PM2 doesn't have a direct logs API, so use direct access with pm2 command cli `pm2 log ${app_name}`
   }
 
   // Utility methods
   formatBytes(bytes) {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return "0 B";
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   }
 
   formatUptime(ms) {
@@ -703,20 +774,24 @@ class PM2TelegramBot {
     this.bot.start({
       onStart: (botInfo) => {
         console.log(`🤖 Bot @${botInfo.username} started successfully.`);
-        console.log(`📊 Monitoring ${this.authorizedUsers.length} authorized users`);
-        console.log(`⚙️ CPU threshold: ${this.cpuThreshold}%, Memory threshold: ${this.memoryThreshold}MB`);
-      }
+        console.log(
+          `📊 Monitoring ${this.authorizedUsers.length} authorized users`
+        );
+        console.log(
+          `⚙️ CPU threshold: ${this.cpuThreshold}%, Memory threshold: ${this.memoryThreshold}MB`
+        );
+      },
     });
   }
 }
 
 // Error handling
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
 
 // Start the bot
