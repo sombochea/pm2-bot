@@ -10,6 +10,8 @@ class PM2TelegramBot {
     this.bot = new Bot(process.env.BOT_TOKEN);
     this.authorizedUsers =
       process.env.AUTHORIZED_USERS?.split(",").map((id) => parseInt(id)) || [];
+    this.authorizedChatsForAlert =
+      process.env.AUTHORIZED_CHATS_FOR_ALERT?.split(",").map((id) => parseInt(id)) || [];
     this.monitorInterval = parseInt(process.env.MONITOR_INTERVAL) || 30000;
     this.cpuThreshold = parseInt(process.env.CPU_THRESHOLD) || 80;
     this.memoryThreshold = parseInt(process.env.MEMORY_THRESHOLD) || 80;
@@ -158,7 +160,7 @@ class PM2TelegramBot {
         const cpu = proc.monit?.cpu || 0;
         const memory = proc.monit?.memory ? Math.round(proc.monit.memory / 1024 / 1024) : 0;
         const restarts = proc.pm2_env.restart_time || 0;
-        
+
         message += `${statusIcon} <b>${proc.name}</b>\n`;
         if (status === 'online') {
           message += `   💻 ${cpu}% CPU | 💾 ${memory}MB | 🔄 ${restarts}x\n`;
@@ -198,12 +200,12 @@ class PM2TelegramBot {
 
       // First process button
       keyboard.text(`⚡ ${proc1.name}`, `app_${proc1.name}`);
-      
+
       // Second process button (if exists)
       if (proc2) {
         keyboard.text(`⚡ ${proc2.name}`, `app_${proc2.name}`);
       }
-      
+
       keyboard.row();
     }
 
@@ -212,13 +214,13 @@ class PM2TelegramBot {
       if (currentPage > 0) {
         keyboard.text('⬅️ Prev', `status_page_${currentPage - 1}_${filter}`);
       }
-      
+
       keyboard.text(`${currentPage + 1}/${totalPages}`, 'noop');
-      
+
       if (currentPage < totalPages - 1) {
         keyboard.text('➡️ Next', `status_page_${currentPage + 1}_${filter}`);
       }
-      
+
       keyboard.row();
     }
 
@@ -247,7 +249,7 @@ class PM2TelegramBot {
     try {
       const processes = await this.getPM2Processes();
       const proc = processes.find(p => p.name === appName);
-      
+
       if (!proc) {
         return ctx.reply(`❌ Process "${appName}" not found.`);
       }
@@ -262,29 +264,29 @@ class PM2TelegramBot {
 
       let message = `${statusIcon} <b>${appName}</b>\n\n`;
       message += `📊 <b>Status:</b> <code>${status}</code>\n`;
-      
+
       if (status === 'online') {
         message += `🆔 <b>PID:</b> <code>${pid}</code>\n`;
         message += `💻 <b>CPU:</b> <code>${cpu}%</code>\n`;
         message += `💾 <b>Memory:</b> <code>${memory}</code>\n`;
         message += `⏱️ <b>Uptime:</b> <code>${uptime}</code>\n`;
       }
-      
+
       message += `🔄 <b>Restarts:</b> <code>${restarts}</code>\n`;
 
       // Add health info if available
       if (this.httpHealthCheckEnabled) {
         const health = this.processHealthHistory.get(appName);
         const endpoint = this.getHealthEndpointForApp(appName);
-        
+
         message += `\n🏥 <b>Health Check:</b>\n`;
         message += `🔗 <code>${endpoint}</code>\n`;
-        
+
         if (health) {
           const timeSinceHealthy = Math.round((Date.now() - health.lastHealthyTime) / 1000);
-          const healthIcon = health.consecutiveUnhealthyChecks === 0 ? '🟢' : 
-                           health.consecutiveUnhealthyChecks < 3 ? '🟡' : '🔴';
-          
+          const healthIcon = health.consecutiveUnhealthyChecks === 0 ? '🟢' :
+            health.consecutiveUnhealthyChecks < 3 ? '🟡' : '🔴';
+
           message += `${healthIcon} Last healthy: <code>${timeSinceHealthy}s ago</code>\n`;
           if (health.lastHttpStatus) {
             message += `📡 Last status: <code>${health.lastHttpStatus}</code>\n`;
@@ -824,7 +826,7 @@ class PM2TelegramBot {
       // Manual health check for specific app
       const appName = data.replace("healthcheck_", "");
       ctx.answerCallbackQuery("🏥 Checking health...");
-      
+
       try {
         const processes = await this.getPM2Processes();
         const proc = processes.find(p => p.name === appName);
@@ -841,7 +843,7 @@ class PM2TelegramBot {
       // Prompt for endpoint setting
       const appName = data.replace("setendpoint_", "");
       const endpoint = this.getHealthEndpointForApp(appName);
-      
+
       ctx.reply(
         `🔗 <b>Set Health Endpoint for ${appName}</b>\n\n` +
         `Current: <code>${endpoint}</code>\n\n` +
@@ -981,10 +983,10 @@ class PM2TelegramBot {
 
   async sendAlert(message) {
     // Send alert to all authorized users
-    for (const userId of this.authorizedUsers) {
+    for (const chatId of this.authorizedChatsForAlert) {
       try {
         await this.bot.api.sendMessage(
-          userId,
+          chatId,
           `🚨 <b>PM2 Alert</b>\n\n${message}`,
           {
             parse_mode: "HTML",
@@ -1199,6 +1201,9 @@ class PM2TelegramBot {
         console.log(`🤖 Bot @${botInfo.username} started successfully.`);
         console.log(
           `📊 Monitoring ${this.authorizedUsers.length} authorized users`
+        );
+        console.log(
+          `📢 Alerting ${this.authorizedChatsForAlert.length} authorized chats`
         );
         console.log(
           `⚙️ CPU threshold: ${this.cpuThreshold}%, Memory threshold: ${this.memoryThreshold}MB`

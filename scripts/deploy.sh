@@ -79,5 +79,5 @@ ssh $SSH_OPTS $USER@$SERVER "cd $DEST && npm install"
 
 # Start/restart the application with PM2
 echo "Starting application with PM2..."
-ssh $SSH_OPTS $USER@$SERVER "cd $DEST && pm2 restart $APP_NAME || pm2 start src/bot.js --name $APP_NAME"
+ssh $SSH_OPTS $USER@$SERVER "cd $DEST && pm2 delete $APP_NAME 2>/dev/null || true; pm2 start bot.js --name $APP_NAME"
 echo "PM2 Node.js deployment completed successfully!"
