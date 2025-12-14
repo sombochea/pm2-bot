@@ -54,7 +54,8 @@ class PM2TelegramBot {
         "🤖 <b>PM2 Management Bot</b>\n\n" +
         "Welcome! I can help you manage your PM2 processes.\n\n" +
         "Use the buttons below or these commands:\n" +
-        "• <code>/status</code> - Show all processes\n" +
+        "• <code>/status</code> - Show all processes (paginated)\n" +
+        "• <code>/quick</code> - Quick status overview\n" +
         "• <code>/restart &lt;name&gt;</code> - Restart specific app\n" +
         "• <code>/stop &lt;name&gt;</code> - Stop specific app\n" +
         "• <code>/start &lt;name&gt;</code> - Start specific app\n" +
@@ -76,6 +77,7 @@ class PM2TelegramBot {
 
     // Status command
     this.bot.command("status", (ctx) => this.getProcessStatus(ctx));
+    this.bot.command("quick", (ctx) => this.getQuickStatus(ctx));
     this.bot.hears("📊 Status", (ctx) => this.getProcessStatus(ctx));
 
     // Restart commands
@@ -109,7 +111,7 @@ class PM2TelegramBot {
     // Callback query handlers
     this.bot.on("callback_query", (ctx) => this.handleCallbackQuery(ctx));
   }
-  async getProcessStatus(ctx) {
+  async getProcessStatus(ctx, page = 0, filter = 'all') {
     try {
       const processes = await this.getPM2Processes();
 
@@ -117,60 +119,57 @@ class PM2TelegramBot {
         return ctx.reply("📭 No PM2 processes found.");
       }
 
-      let message = "📊 <b>PM2 Process Status</b>\n\n";
+      // Filter processes
+      let filteredProcesses = processes;
+      switch (filter) {
+        case 'online':
+          filteredProcesses = processes.filter(p => p.pm2_env.status === 'online');
+          break;
+        case 'stopped':
+          filteredProcesses = processes.filter(p => p.pm2_env.status === 'stopped');
+          break;
+        case 'errored':
+          filteredProcesses = processes.filter(p => p.pm2_env.status === 'errored');
+          break;
+      }
 
-      processes.forEach((proc) => {
+      if (filteredProcesses.length === 0) {
+        return ctx.reply(`📭 No ${filter} processes found.`);
+      }
+
+      // Pagination
+      const itemsPerPage = 5;
+      const totalPages = Math.ceil(filteredProcesses.length / itemsPerPage);
+      const startIndex = page * itemsPerPage;
+      const endIndex = Math.min(startIndex + itemsPerPage, filteredProcesses.length);
+      const pageProcesses = filteredProcesses.slice(startIndex, endIndex);
+
+      // Create compact status message
+      let message = `📊 <b>PM2 Status</b> (${filter} - ${page + 1}/${totalPages})\n\n`;
+
+      // Summary stats
+      const stats = this.getProcessStats(processes);
+      message += `📈 <b>Summary:</b> ${stats.online}🟢 ${stats.stopped}🔴 ${stats.errored}🟡 | Total: ${processes.length}\n\n`;
+
+      // Process list (compact format)
+      pageProcesses.forEach((proc, index) => {
         const status = proc.pm2_env.status;
-        const statusIcon =
-          status === "online" ? "🟢" : status === "stopped" ? "🔴" : "🟡";
+        const statusIcon = status === "online" ? "🟢" : status === "stopped" ? "🔴" : "🟡";
         const cpu = proc.monit?.cpu || 0;
-        const memory = proc.monit?.memory
-          ? this.formatBytes(proc.monit.memory)
-          : "0 MB";
-        const uptime = proc.pm2_env.pm_uptime
-          ? this.formatUptime(Date.now() - proc.pm2_env.pm_uptime)
-          : "N/A";
+        const memory = proc.monit?.memory ? Math.round(proc.monit.memory / 1024 / 1024) : 0;
         const restarts = proc.pm2_env.restart_time || 0;
-
+        
         message += `${statusIcon} <b>${proc.name}</b>\n`;
-        message += `   Status: <code>${status}</code>\n`;
-        message += `   CPU: <code>${cpu}%</code> | Memory: <code>${memory}</code>\n`;
-        message += `   Uptime: <code>${uptime}</code> | Restarts: <code>${restarts}</code>\n\n`;
-      });
-
-      // Create keyboard with individual app controls
-      const keyboard = new InlineKeyboard();
-
-      // Add individual app controls
-      processes.forEach((proc) => {
-        const status = proc.pm2_env.status;
-        const name = proc.name;
-
-        if (status === "online") {
-          // For online processes: restart, reload, stop, logs
-          keyboard
-            .text(`🔄 ${name}`, `restart_${name}`)
-            .text(`🔃 ${name}`, `reload_${name}`)
-            .row()
-            .text(`⏹️ ${name}`, `stop_${name}`)
-            .text(`📄 ${name}`, `logs_${name}`)
-            .row();
+        if (status === 'online') {
+          message += `   💻 ${cpu}% CPU | 💾 ${memory}MB | 🔄 ${restarts}x\n`;
         } else {
-          // For stopped processes: start, logs
-          keyboard
-            .text(`▶️ ${name}`, `start_${name}`)
-            .text(`📄 ${name}`, `logs_${name}`)
-            .row();
+          message += `   Status: <code>${status}</code> | Restarts: <code>${restarts}</code>\n`;
         }
+        message += '\n';
       });
 
-      // Add general controls
-      keyboard
-        .text("🔄 Refresh", "refresh_status")
-        .text("📈 Details", "detailed_status")
-        .row()
-        .text("🔄 Restart All", "restart_all")
-        .text("⏹️ Stop All", "stop_all");
+      // Create navigation keyboard
+      const keyboard = this.createStatusKeyboard(pageProcesses, page, totalPages, filter, processes.length);
 
       ctx.reply(message, {
         parse_mode: "HTML",
@@ -178,6 +177,211 @@ class PM2TelegramBot {
       });
     } catch (error) {
       ctx.reply(`❌ Error getting process status: ${error.message}`);
+    }
+  }
+
+  getProcessStats(processes) {
+    return {
+      online: processes.filter(p => p.pm2_env.status === 'online').length,
+      stopped: processes.filter(p => p.pm2_env.status === 'stopped').length,
+      errored: processes.filter(p => p.pm2_env.status === 'errored').length
+    };
+  }
+
+  createStatusKeyboard(pageProcesses, currentPage, totalPages, filter, totalCount) {
+    const keyboard = new InlineKeyboard();
+
+    // Process action buttons (2 per row for better layout)
+    for (let i = 0; i < pageProcesses.length; i += 2) {
+      const proc1 = pageProcesses[i];
+      const proc2 = pageProcesses[i + 1];
+
+      // First process button
+      keyboard.text(`⚡ ${proc1.name}`, `app_${proc1.name}`);
+      
+      // Second process button (if exists)
+      if (proc2) {
+        keyboard.text(`⚡ ${proc2.name}`, `app_${proc2.name}`);
+      }
+      
+      keyboard.row();
+    }
+
+    // Pagination controls
+    if (totalPages > 1) {
+      if (currentPage > 0) {
+        keyboard.text('⬅️ Prev', `status_page_${currentPage - 1}_${filter}`);
+      }
+      
+      keyboard.text(`${currentPage + 1}/${totalPages}`, 'noop');
+      
+      if (currentPage < totalPages - 1) {
+        keyboard.text('➡️ Next', `status_page_${currentPage + 1}_${filter}`);
+      }
+      
+      keyboard.row();
+    }
+
+    // Filter buttons
+    keyboard
+      .text(filter === 'all' ? '🔘 All' : '⚪ All', 'status_filter_all')
+      .text(filter === 'online' ? '🔘 Online' : '⚪ Online', 'status_filter_online')
+      .row()
+      .text(filter === 'stopped' ? '🔘 Stopped' : '⚪ Stopped', 'status_filter_stopped')
+      .text(filter === 'errored' ? '🔘 Errored' : '⚪ Errored', 'status_filter_errored')
+      .row();
+
+    // Action buttons
+    keyboard
+      .text('🔄 Refresh', 'refresh_status')
+      .text('📈 Details', 'detailed_status')
+      .row()
+      .text('🔄 All', 'restart_all')
+      .text('⏹️ All', 'stop_all')
+      .text('▶️ All', 'start_all');
+
+    return keyboard;
+  }
+
+  async showAppActions(ctx, appName) {
+    try {
+      const processes = await this.getPM2Processes();
+      const proc = processes.find(p => p.name === appName);
+      
+      if (!proc) {
+        return ctx.reply(`❌ Process "${appName}" not found.`);
+      }
+
+      const status = proc.pm2_env.status;
+      const statusIcon = status === "online" ? "🟢" : status === "stopped" ? "🔴" : "🟡";
+      const cpu = proc.monit?.cpu || 0;
+      const memory = proc.monit?.memory ? this.formatBytes(proc.monit.memory) : "0 MB";
+      const uptime = proc.pm2_env.pm_uptime ? this.formatUptime(Date.now() - proc.pm2_env.pm_uptime) : "N/A";
+      const restarts = proc.pm2_env.restart_time || 0;
+      const pid = proc.pid || 'N/A';
+
+      let message = `${statusIcon} <b>${appName}</b>\n\n`;
+      message += `📊 <b>Status:</b> <code>${status}</code>\n`;
+      
+      if (status === 'online') {
+        message += `🆔 <b>PID:</b> <code>${pid}</code>\n`;
+        message += `💻 <b>CPU:</b> <code>${cpu}%</code>\n`;
+        message += `💾 <b>Memory:</b> <code>${memory}</code>\n`;
+        message += `⏱️ <b>Uptime:</b> <code>${uptime}</code>\n`;
+      }
+      
+      message += `🔄 <b>Restarts:</b> <code>${restarts}</code>\n`;
+
+      // Add health info if available
+      if (this.httpHealthCheckEnabled) {
+        const health = this.processHealthHistory.get(appName);
+        const endpoint = this.getHealthEndpointForApp(appName);
+        
+        message += `\n🏥 <b>Health Check:</b>\n`;
+        message += `🔗 <code>${endpoint}</code>\n`;
+        
+        if (health) {
+          const timeSinceHealthy = Math.round((Date.now() - health.lastHealthyTime) / 1000);
+          const healthIcon = health.consecutiveUnhealthyChecks === 0 ? '🟢' : 
+                           health.consecutiveUnhealthyChecks < 3 ? '🟡' : '🔴';
+          
+          message += `${healthIcon} Last healthy: <code>${timeSinceHealthy}s ago</code>\n`;
+          if (health.lastHttpStatus) {
+            message += `📡 Last status: <code>${health.lastHttpStatus}</code>\n`;
+          }
+          if (health.lastResponseTime) {
+            message += `⚡ Response: <code>${health.lastResponseTime}ms</code>\n`;
+          }
+        }
+      }
+
+      // Create action keyboard
+      const keyboard = new InlineKeyboard();
+
+      if (status === 'online') {
+        keyboard
+          .text('🔄 Restart', `restart_${appName}`)
+          .text('🔃 Reload', `reload_${appName}`)
+          .row()
+          .text('⏹️ Stop', `stop_${appName}`)
+          .text('📄 Logs', `logs_${appName}`)
+          .row();
+      } else {
+        keyboard
+          .text('▶️ Start', `start_${appName}`)
+          .text('📄 Logs', `logs_${appName}`)
+          .row();
+      }
+
+      // Health check actions
+      if (this.httpHealthCheckEnabled) {
+        keyboard
+          .text('🏥 Health Check', `healthcheck_${appName}`)
+          .text('🔗 Set Endpoint', `setendpoint_${appName}`)
+          .row();
+      }
+
+      // Navigation
+      keyboard
+        .text('📊 Back to Status', 'refresh_status')
+        .text('🔄 Refresh App', `app_${appName}`);
+
+      ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+
+    } catch (error) {
+      ctx.reply(`❌ Error getting app details: ${error.message}`);
+    }
+  }
+
+  async getQuickStatus(ctx) {
+    try {
+      const processes = await this.getPM2Processes();
+
+      if (processes.length === 0) {
+        return ctx.reply("📭 No PM2 processes found.");
+      }
+
+      const stats = this.getProcessStats(processes);
+      let message = `📊 <b>Quick Status</b>\n\n`;
+      message += `📈 ${stats.online}🟢 ${stats.stopped}🔴 ${stats.errored}🟡 (${processes.length} total)\n\n`;
+
+      // Group by status for compact display
+      const online = processes.filter(p => p.pm2_env.status === 'online');
+      const stopped = processes.filter(p => p.pm2_env.status === 'stopped');
+      const errored = processes.filter(p => p.pm2_env.status === 'errored');
+
+      if (online.length > 0) {
+        message += `🟢 <b>Online (${online.length}):</b>\n`;
+        message += online.map(p => `   • ${p.name}`).join('\n') + '\n\n';
+      }
+
+      if (stopped.length > 0) {
+        message += `🔴 <b>Stopped (${stopped.length}):</b>\n`;
+        message += stopped.map(p => `   • ${p.name}`).join('\n') + '\n\n';
+      }
+
+      if (errored.length > 0) {
+        message += `🟡 <b>Errored (${errored.length}):</b>\n`;
+        message += errored.map(p => `   • ${p.name}`).join('\n') + '\n\n';
+      }
+
+      const keyboard = new InlineKeyboard()
+        .text('📊 Full Status', 'refresh_status')
+        .text('🔄 Refresh', 'quick_status')
+        .row()
+        .text('🔄 Restart All', 'restart_all')
+        .text('⏹️ Stop All', 'stop_all');
+
+      ctx.reply(message, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
+      });
+
+    } catch (error) {
+      ctx.reply(`❌ Error getting quick status: ${error.message}`);
     }
   }
 
@@ -515,7 +719,7 @@ class PM2TelegramBot {
     const data = ctx.callbackQuery.data;
 
     if (data === "refresh_status") {
-      await this.getProcessStatus(ctx);
+      await this.getProcessStatus(ctx, 0, 'all');
     } else if (data === "detailed_status") {
       await this.getDetailedStatus(ctx);
     } else if (data.startsWith("restart_")) {
@@ -594,6 +798,62 @@ class PM2TelegramBot {
       } catch (error) {
         ctx.answerCallbackQuery("❌ Failed to stop all processes");
       }
+    } else if (data === "start_all") {
+      try {
+        await this.pm2StartAll();
+        ctx.answerCallbackQuery("✅ All processes started");
+        await this.getProcessStatus(ctx);
+      } catch (error) {
+        ctx.answerCallbackQuery("❌ Failed to start all processes");
+      }
+    } else if (data.startsWith("app_")) {
+      // Show individual app actions
+      const appName = data.replace("app_", "");
+      await this.showAppActions(ctx, appName);
+    } else if (data.startsWith("status_page_")) {
+      // Handle pagination
+      const parts = data.replace("status_page_", "").split("_");
+      const page = parseInt(parts[0]);
+      const filter = parts[1] || 'all';
+      await this.getProcessStatus(ctx, page, filter);
+    } else if (data.startsWith("status_filter_")) {
+      // Handle filtering
+      const filter = data.replace("status_filter_", "");
+      await this.getProcessStatus(ctx, 0, filter);
+    } else if (data.startsWith("healthcheck_")) {
+      // Manual health check for specific app
+      const appName = data.replace("healthcheck_", "");
+      ctx.answerCallbackQuery("🏥 Checking health...");
+      
+      try {
+        const processes = await this.getPM2Processes();
+        const proc = processes.find(p => p.name === appName);
+        if (proc && this.httpHealthCheckEnabled) {
+          await this.checkHttpHealth(proc);
+          ctx.reply(`✅ Health check completed for ${appName}`);
+        } else {
+          ctx.reply(`❌ Cannot perform health check for ${appName}`);
+        }
+      } catch (error) {
+        ctx.reply(`❌ Health check failed for ${appName}: ${error.message}`);
+      }
+    } else if (data.startsWith("setendpoint_")) {
+      // Prompt for endpoint setting
+      const appName = data.replace("setendpoint_", "");
+      const endpoint = this.getHealthEndpointForApp(appName);
+      
+      ctx.reply(
+        `🔗 <b>Set Health Endpoint for ${appName}</b>\n\n` +
+        `Current: <code>${endpoint}</code>\n\n` +
+        `Use: <code>/setendpoint ${appName} &lt;new_url&gt;</code>\n\n` +
+        `Example: <code>/setendpoint ${appName} http://localhost:3001/health</code>`,
+        { parse_mode: 'HTML' }
+      );
+    } else if (data === 'quick_status') {
+      await this.getQuickStatus(ctx);
+    } else if (data === 'noop') {
+      // No operation (for pagination display)
+      ctx.answerCallbackQuery();
     }
   }
   async getDetailedStatus(ctx) {
