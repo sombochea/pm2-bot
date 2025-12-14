@@ -19,6 +19,15 @@ A comprehensive Telegram bot for managing PM2 processes with real-time monitorin
 - **Smart Restart Logic**: Attempts to restart stuck processes with configurable retry limits
 - **Alert System**: Notifies administrators of auto-restart actions and failures
 
+### 🏥 Advanced Health Monitoring
+- **Process Health Checks**: Comprehensive health monitoring with multiple detection methods
+- **Stuck Process Detection**: Identifies processes with consistently low CPU activity
+- **Memory Leak Detection**: Monitors for increasing memory usage patterns
+- **Responsiveness Checks**: Uses PM2 ping to verify process responsiveness
+- **Frequent Restart Detection**: Alerts on processes that restart too often
+- **Group Chat Alerts**: Send alerts to Telegram groups for team notifications
+- **Auto-restart on Health Failure**: Automatically restarts unhealthy processes
+
 ### 🔐 Security
 - **User Authorization**: Only authorized users can control PM2 processes
 - **Secure Commands**: All operations require proper authentication
@@ -64,6 +73,8 @@ RESTART_THRESHOLD=5
 - `/reload <name>` - Reload specific process (zero-downtime)
 - `/logs <name>` - View process logs
 - `/monitor` - Show monitoring status
+- `/health` - Show health monitoring status
+- `/healthtoggle` - Enable/disable health monitoring
 - `/help` - Show help message
 
 ### Interactive Buttons
@@ -74,6 +85,7 @@ The bot provides an intuitive button interface for common operations:
 - ⏹️ Stop All - Stop all processes
 - ▶️ Start All - Start all processes
 - 📈 Monitor - View monitoring dashboard
+- 🏥 Health - View health monitoring status
 - ⚙️ Settings - View bot configuration
 
 ### Monitoring Features
@@ -101,6 +113,12 @@ The bot provides an intuitive button interface for common operations:
 | `CPU_THRESHOLD` | CPU usage alert threshold (%) | 80 |
 | `MEMORY_THRESHOLD` | Memory usage alert threshold (MB) | 80 |
 | `RESTART_THRESHOLD` | Max auto-restart attempts | 5 |
+| `ALERT_GROUP_CHAT_ID` | Telegram group chat ID for alerts | Optional |
+| `HEALTH_CHECK_ENABLED` | Enable health monitoring | true |
+| `HEALTH_CHECK_INTERVAL` | Health check interval (ms) | 60000 |
+| `STUCK_PROCESS_THRESHOLD` | Time before process considered stuck (ms) | 300000 |
+| `MEMORY_LEAK_THRESHOLD` | Memory threshold for leak detection (MB) | 500 |
+| `CPU_STUCK_THRESHOLD` | CPU threshold for stuck detection (%) | 0.1 |
 
 ### Getting Your Telegram User ID
 
