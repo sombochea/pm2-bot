@@ -28,6 +28,8 @@ class PM2TelegramBot {
     this.auditLogMaxLines = parseInt(process.env.AUDIT_LOG_MAX_LINES) || 10000;
     this.auditLogCurrentLines = 0;
 
+    // Simplified audit logging - we'll get user info directly from ctx
+
     // Initialize audit logging
     if (this.auditLoggingEnabled) {
       this.initializeAuditLogging();
@@ -59,6 +61,10 @@ class PM2TelegramBot {
   }
 
   async logAudit(action, description, metadata = {}) {
+    return this.logAuditWithCtx(action, description, metadata, null);
+  }
+
+  async logAuditWithCtx(action, description, metadata = {}, ctx = null) {
     if (!this.auditLoggingEnabled) return;
 
     try {
@@ -67,7 +73,13 @@ class PM2TelegramBot {
         timestamp,
         action,
         description,
-        metadata
+        metadata: {
+          ...metadata,
+          // Add chat ID if ctx is provided
+          ...(ctx && ctx.chat?.id && {
+            from_chat_id: ctx.chat.id
+          })
+        }
       };
 
       const logLine = JSON.stringify(logEntry) + '\n';
@@ -79,7 +91,8 @@ class PM2TelegramBot {
       await fs.appendFile(this.auditLogFile, logLine);
       this.auditLogCurrentLines++;
 
-      console.log(`📝 Audit: ${action} - ${description}`);
+      const chatStr = ctx?.chat?.id ? ` from chat ${ctx.chat.id}` : '';
+      console.log(`📝 Audit: ${action} - ${description}${chatStr}`);
     } catch (error) {
       console.error('Failed to write audit log:', error);
     }
@@ -144,21 +157,14 @@ class PM2TelegramBot {
     // Audit logging middleware
     if (this.auditLoggingEnabled) {
       this.bot.use(async (ctx, next) => {
-        const user = ctx.from;
-        const chat = ctx.chat;
         const message = ctx.message;
 
         // Log the incoming request
-        await this.logAudit('REQUEST', 'Incoming message', {
-          userId: user?.id,
-          username: user?.username,
-          firstName: user?.first_name,
-          chatId: chat?.id,
-          chatType: chat?.type,
+        await this.logAuditWithCtx('REQUEST', 'Incoming message', {
           messageType: message?.text ? 'text' : 'other',
           command: message?.text?.startsWith('/') ? message.text.split(' ')[0] : null,
           messageText: message?.text?.substring(0, 100) // Truncate long messages
-        });
+        }, ctx);
 
         return next();
       });
@@ -176,12 +182,11 @@ class PM2TelegramBot {
 
       // Log unauthorized access attempt
       if (this.auditLoggingEnabled) {
-        this.logAudit('SECURITY', 'Unauthorized access attempt', {
+        this.logAuditWithCtx('SECURITY', 'Unauthorized access attempt', {
           userId: ctx.from?.id,
           username: ctx.from?.username,
-          chatId: ctx.chat?.id,
           messageText: ctx.message?.text
-        });
+        }, ctx);
       }
 
       console.log("Unauthorized from chat", ctx.from);
@@ -564,7 +569,7 @@ class PM2TelegramBot {
     }
 
     try {
-      await this.pm2Restart(processName);
+      await this.pm2Restart(processName, ctx);
       ctx.reply(`✅ Process "${processName}" restarted successfully.`);
     } catch (error) {
       ctx.reply(`❌ Failed to restart "${processName}": ${error.message}`);
@@ -573,7 +578,7 @@ class PM2TelegramBot {
 
   async restartAllProcesses(ctx) {
     try {
-      await this.pm2RestartAll();
+      await this.pm2RestartAll(ctx);
       ctx.reply("✅ All processes restarted successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to restart all processes: ${error.message}`);
@@ -604,7 +609,7 @@ class PM2TelegramBot {
     }
 
     try {
-      await this.pm2Stop(processName);
+      await this.pm2Stop(processName, ctx);
       ctx.reply(`✅ Process "${processName}" stopped successfully.`);
     } catch (error) {
       ctx.reply(`❌ Failed to stop "${processName}": ${error.message}`);
@@ -613,7 +618,7 @@ class PM2TelegramBot {
 
   async stopAllProcesses(ctx) {
     try {
-      await this.pm2StopAll();
+      await this.pm2StopAll(ctx);
       ctx.reply("✅ All processes stopped successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to stop all processes: ${error.message}`);
@@ -644,7 +649,7 @@ class PM2TelegramBot {
     }
 
     try {
-      await this.pm2Start(processName);
+      await this.pm2Start(processName, ctx);
       ctx.reply(`✅ Process "${processName}" started successfully.`);
     } catch (error) {
       ctx.reply(`❌ Failed to start "${processName}": ${error.message}`);
@@ -653,7 +658,7 @@ class PM2TelegramBot {
 
   async startAllProcesses(ctx) {
     try {
-      await this.pm2StartAll();
+      await this.pm2StartAll(ctx);
       ctx.reply("✅ All processes started successfully.");
     } catch (error) {
       ctx.reply(`❌ Failed to start all processes: ${error.message}`);
@@ -684,7 +689,7 @@ class PM2TelegramBot {
     }
 
     try {
-      await this.pm2Reload(processName);
+      await this.pm2Reload(processName, ctx);
       ctx.reply(`✅ Process "${processName}" reloaded successfully.`);
     } catch (error) {
       ctx.reply(`❌ Failed to reload "${processName}": ${error.message}`);
@@ -910,11 +915,25 @@ class PM2TelegramBot {
           message += `🕐 <code>${time}</code>\n`;
           message += `📋 <b>${entry.action}</b>: ${entry.description}\n`;
 
+          // Show who executed the action
+          if (entry.metadata?.executedBy) {
+            const user = entry.metadata.executedBy;
+            const userStr = user.username || user.firstName || `ID:${user.userId}`;
+            message += `� <b>By:$</b> <code>${userStr}</code>\n`;
+          } else if (entry.action.includes('AUTO') || entry.action === 'SYSTEM') {
+            message += `🤖 <b>By:</b> <code>System</code>\n`;
+          }
+
           if (entry.metadata && Object.keys(entry.metadata).length > 0) {
-            const metaStr = Object.entries(entry.metadata)
-              .map(([key, value]) => `${key}: ${value}`)
+            // Filter out executedBy from metadata display since we show it separately
+            const filteredMeta = Object.entries(entry.metadata)
+              .filter(([key]) => key !== 'from_chat_id')
+              .map(([key, value]) => `${key}: ${typeof value === 'object' ? JSON.stringify(value) : value}`)
               .join(', ');
-            message += `📊 <code>${metaStr}</code>\n`;
+
+            if (filteredMeta) {
+              message += `📊 <code>${filteredMeta}</code>\n`;
+            }
           }
           message += '\n';
         } catch (error) {
@@ -1003,7 +1022,7 @@ class PM2TelegramBot {
     } else if (data.startsWith("restart_")) {
       const processName = data.replace("restart_", "");
       try {
-        await this.pm2Restart(processName);
+        await this.pm2Restart(processName, ctx);
         ctx.answerCallbackQuery(`✅ ${processName} restarted`);
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1012,7 +1031,7 @@ class PM2TelegramBot {
     } else if (data.startsWith("stop_")) {
       const processName = data.replace("stop_", "");
       try {
-        await this.pm2Stop(processName);
+        await this.pm2Stop(processName, ctx);
         ctx.answerCallbackQuery(`✅ ${processName} stopped`);
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1021,7 +1040,7 @@ class PM2TelegramBot {
     } else if (data.startsWith("start_")) {
       const processName = data.replace("start_", "");
       try {
-        await this.pm2Start(processName);
+        await this.pm2Start(processName, ctx);
         ctx.answerCallbackQuery(`✅ ${processName} started`);
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1030,7 +1049,7 @@ class PM2TelegramBot {
     } else if (data.startsWith("reload_")) {
       const processName = data.replace("reload_", "");
       try {
-        await this.pm2Reload(processName);
+        await this.pm2Reload(processName, ctx);
         ctx.answerCallbackQuery(`✅ ${processName} reloaded`);
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1062,7 +1081,7 @@ class PM2TelegramBot {
       await this.showProcessErrorLogs(ctx, processName);
     } else if (data === "restart_all") {
       try {
-        await this.pm2RestartAll();
+        await this.pm2RestartAll(ctx);
         ctx.answerCallbackQuery("✅ All processes restarted");
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1070,7 +1089,7 @@ class PM2TelegramBot {
       }
     } else if (data === "stop_all") {
       try {
-        await this.pm2StopAll();
+        await this.pm2StopAll(ctx);
         ctx.answerCallbackQuery("✅ All processes stopped");
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1078,7 +1097,7 @@ class PM2TelegramBot {
       }
     } else if (data === "start_all") {
       try {
-        await this.pm2StartAll();
+        await this.pm2StartAll(ctx);
         ctx.answerCallbackQuery("✅ All processes started");
         await this.getProcessStatus(ctx);
       } catch (error) {
@@ -1241,7 +1260,12 @@ class PM2TelegramBot {
 
     if (currentCount < this.restartThreshold) {
       try {
-        await this.pm2Restart(processName);
+        // Auto-restart is system-initiated, so we pass null for ctx
+        // but add metadata to indicate it's an automatic action
+        await this.logAuditWithCtx('PM2_AUTO_RESTART', `Auto-restarting stuck process: ${processName}`,
+          { processName, reason: 'health_check_failure', attempt: currentCount + 1 }, null);
+
+        await this.pm2Restart(processName, null);
         this.restartCounts.set(processName, currentCount + 1);
         await this.sendAlert(
           `🔄 Auto-restarted stuck process: ${processName} (attempt ${currentCount + 1
@@ -1292,143 +1316,161 @@ class PM2TelegramBot {
     });
   }
 
-  async pm2Restart(processName) {
-    await this.logAudit('PM2_RESTART', `Restarting process: ${processName}`, { processName });
+  async pm2Restart(processName, ctx = null) {
+    await this.logAuditWithCtx('PM2_RESTART', `Restarting process: ${processName}`, { processName }, ctx);
 
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) {
-          this.logAudit('PM2_ERROR', `Failed to connect for restart: ${processName}`, { processName, error: err.message });
+          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for restart: ${processName}`, { processName, error: err.message }, ctx);
           return reject(err);
         }
 
         pm2.restart(processName, async (err) => {
           pm2.disconnect();
           if (err) {
-            await this.logAudit('PM2_ERROR', `Failed to restart: ${processName}`, { processName, error: err.message });
+            await this.logAuditWithCtx('PM2_ERROR', `Failed to restart: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
           }
-          await this.logAudit('PM2_SUCCESS', `Successfully restarted: ${processName}`, { processName });
+          await this.logAuditWithCtx('PM2_SUCCESS', `Successfully restarted: ${processName}`, { processName }, ctx);
           resolve();
         });
       });
     });
   }
 
-  async pm2RestartAll() {
-    await this.logAudit('PM2_RESTART_ALL', 'Restarting all processes');
+  async pm2RestartAll(ctx = null) {
+    await this.logAuditWithCtx('PM2_RESTART_ALL', 'Restarting all processes', {}, ctx);
 
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) {
-          this.logAudit('PM2_ERROR', 'Failed to connect for restart all', { error: err.message });
+          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for restart all', { error: err.message }, ctx);
           return reject(err);
         }
 
         pm2.restart("all", async (err) => {
           pm2.disconnect();
           if (err) {
-            await this.logAudit('PM2_ERROR', 'Failed to restart all processes', { error: err.message });
+            await this.logAuditWithCtx('PM2_ERROR', 'Failed to restart all processes', { error: err.message }, ctx);
             return reject(err);
           }
-          await this.logAudit('PM2_SUCCESS', 'Successfully restarted all processes');
+          await this.logAuditWithCtx('PM2_SUCCESS', 'Successfully restarted all processes', {}, ctx);
           resolve();
         });
       });
     });
   }
 
-  async pm2Stop(processName) {
-    await this.logAudit('PM2_STOP', `Stopping process: ${processName}`, { processName });
+  async pm2Stop(processName, ctx = null) {
+    await this.logAuditWithCtx('PM2_STOP', `Stopping process: ${processName}`, { processName }, ctx);
 
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) {
-          this.logAudit('PM2_ERROR', `Failed to connect for stop: ${processName}`, { processName, error: err.message });
+          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for stop: ${processName}`, { processName, error: err.message }, ctx);
           return reject(err);
         }
 
         pm2.stop(processName, async (err) => {
           pm2.disconnect();
           if (err) {
-            await this.logAudit('PM2_ERROR', `Failed to stop: ${processName}`, { processName, error: err.message });
+            await this.logAuditWithCtx('PM2_ERROR', `Failed to stop: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
           }
-          await this.logAudit('PM2_SUCCESS', `Successfully stopped: ${processName}`, { processName });
+          await this.logAuditWithCtx('PM2_SUCCESS', `Successfully stopped: ${processName}`, { processName }, ctx);
           resolve();
         });
       });
     });
   }
 
-  async pm2StopAll() {
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) return reject(err);
-
-        pm2.stop("all", (err) => {
-          pm2.disconnect();
-          if (err) return reject(err);
-          resolve();
-        });
-      });
-    });
-  }
-
-  async pm2Start(processName) {
-    await this.logAudit('PM2_START', `Starting process: ${processName}`, { processName });
+  async pm2StopAll(ctx = null) {
+    await this.logAuditWithCtx('PM2_STOP_ALL', 'Stopping all processes', {}, ctx);
 
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) {
-          this.logAudit('PM2_ERROR', `Failed to connect for start: ${processName}`, { processName, error: err.message });
+          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for stop all', { error: err.message }, ctx);
+          return reject(err);
+        }
+
+        pm2.stop("all", async (err) => {
+          pm2.disconnect();
+          if (err) {
+            await this.logAuditWithCtx('PM2_ERROR', 'Failed to stop all processes', { error: err.message }, ctx);
+            return reject(err);
+          }
+          await this.logAuditWithCtx('PM2_SUCCESS', 'Successfully stopped all processes', {}, ctx);
+          resolve();
+        });
+      });
+    });
+  }
+
+  async pm2Start(processName, ctx = null) {
+    await this.logAuditWithCtx('PM2_START', `Starting process: ${processName}`, { processName }, ctx);
+
+    return new Promise((resolve, reject) => {
+      pm2.connect((err) => {
+        if (err) {
+          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for start: ${processName}`, { processName, error: err.message }, ctx);
           return reject(err);
         }
 
         pm2.start(processName, async (err) => {
           pm2.disconnect();
           if (err) {
-            await this.logAudit('PM2_ERROR', `Failed to start: ${processName}`, { processName, error: err.message });
+            await this.logAuditWithCtx('PM2_ERROR', `Failed to start: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
           }
-          await this.logAudit('PM2_SUCCESS', `Successfully started: ${processName}`, { processName });
+          await this.logAuditWithCtx('PM2_SUCCESS', `Successfully started: ${processName}`, { processName }, ctx);
           resolve();
         });
       });
     });
   }
 
-  async pm2StartAll() {
-    return new Promise((resolve, reject) => {
-      pm2.connect((err) => {
-        if (err) return reject(err);
-
-        pm2.start("all", (err) => {
-          pm2.disconnect();
-          if (err) return reject(err);
-          resolve();
-        });
-      });
-    });
-  }
-
-  async pm2Reload(processName) {
-    await this.logAudit('PM2_RELOAD', `Reloading process: ${processName}`, { processName });
+  async pm2StartAll(ctx = null) {
+    await this.logAuditWithCtx('PM2_START_ALL', 'Starting all processes', {}, ctx);
 
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
         if (err) {
-          this.logAudit('PM2_ERROR', `Failed to connect for reload: ${processName}`, { processName, error: err.message });
+          this.logAuditWithCtx('PM2_ERROR', 'Failed to connect for start all', { error: err.message }, ctx);
+          return reject(err);
+        }
+
+        pm2.start("all", async (err) => {
+          pm2.disconnect();
+          if (err) {
+            await this.logAuditWithCtx('PM2_ERROR', 'Failed to start all processes', { error: err.message }, ctx);
+            return reject(err);
+          }
+          await this.logAuditWithCtx('PM2_SUCCESS', 'Successfully started all processes', {}, ctx);
+          resolve();
+        });
+      });
+    });
+  }
+
+  async pm2Reload(processName, ctx = null) {
+    await this.logAuditWithCtx('PM2_RELOAD', `Reloading process: ${processName}`, { processName }, ctx);
+
+    return new Promise((resolve, reject) => {
+      pm2.connect((err) => {
+        if (err) {
+          this.logAuditWithCtx('PM2_ERROR', `Failed to connect for reload: ${processName}`, { processName, error: err.message }, ctx);
           return reject(err);
         }
 
         pm2.reload(processName, async (err) => {
           pm2.disconnect();
           if (err) {
-            await this.logAudit('PM2_ERROR', `Failed to reload: ${processName}`, { processName, error: err.message });
+            await this.logAuditWithCtx('PM2_ERROR', `Failed to reload: ${processName}`, { processName, error: err.message }, ctx);
             return reject(err);
           }
-          await this.logAudit('PM2_SUCCESS', `Successfully reloaded: ${processName}`, { processName });
+          await this.logAuditWithCtx('PM2_SUCCESS', `Successfully reloaded: ${processName}`, { processName }, ctx);
           resolve();
         });
       });
