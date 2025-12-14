@@ -4,6 +4,8 @@ const { Bot, Keyboard, InlineKeyboard } = require("grammy");
 const pm2 = require("pm2");
 const cron = require("node-cron");
 const { exec } = require("child_process");
+const fs = require("fs-extra");
+const path = require("path");
 
 class PM2TelegramBot {
   constructor() {
@@ -18,12 +20,150 @@ class PM2TelegramBot {
     this.restartThreshold = parseInt(process.env.RESTART_THRESHOLD) || 5;
     this.restartCounts = new Map();
 
+    // Audit logging configuration
+    this.auditLoggingEnabled = process.env.AUDIT_LOGGING_ENABLED === 'true';
+    this.auditLogFile = process.env.AUDIT_LOG_FILE || 'logs/bot-audit.log';
+    this.auditLogMaxSize = parseInt(process.env.AUDIT_LOG_MAX_SIZE) || 10485760; // 10MB
+    this.auditLogMaxFiles = parseInt(process.env.AUDIT_LOG_MAX_FILES) || 5;
+    this.auditLogMaxLines = parseInt(process.env.AUDIT_LOG_MAX_LINES) || 10000;
+    this.auditLogCurrentLines = 0;
+
+    // Initialize audit logging
+    if (this.auditLoggingEnabled) {
+      this.initializeAuditLogging();
+    }
+
     this.setupCommands();
     this.setupMiddleware();
     this.startMonitoring();
   }
 
+  // Audit Logging System
+  async initializeAuditLogging() {
+    try {
+      // Ensure logs directory exists
+      const logDir = path.dirname(this.auditLogFile);
+      await fs.ensureDir(logDir);
+
+      // Count existing lines if file exists
+      if (await fs.pathExists(this.auditLogFile)) {
+        const content = await fs.readFile(this.auditLogFile, 'utf8');
+        this.auditLogCurrentLines = content.split('\n').length - 1;
+      }
+
+      console.log(`📝 Audit logging initialized: ${this.auditLogFile}`);
+      await this.logAudit('SYSTEM', 'Bot started', { timestamp: new Date().toISOString() });
+    } catch (error) {
+      console.error('Failed to initialize audit logging:', error);
+    }
+  }
+
+  async logAudit(action, description, metadata = {}) {
+    if (!this.auditLoggingEnabled) return;
+
+    try {
+      const timestamp = new Date().toISOString();
+      const logEntry = {
+        timestamp,
+        action,
+        description,
+        metadata
+      };
+
+      const logLine = JSON.stringify(logEntry) + '\n';
+
+      // Check if rotation is needed
+      await this.checkLogRotation();
+
+      // Append to log file
+      await fs.appendFile(this.auditLogFile, logLine);
+      this.auditLogCurrentLines++;
+
+      console.log(`📝 Audit: ${action} - ${description}`);
+    } catch (error) {
+      console.error('Failed to write audit log:', error);
+    }
+  }
+
+  async checkLogRotation() {
+    try {
+      if (!await fs.pathExists(this.auditLogFile)) return;
+
+      const stats = await fs.stat(this.auditLogFile);
+      const shouldRotateBySize = stats.size >= this.auditLogMaxSize;
+      const shouldRotateByLines = this.auditLogCurrentLines >= this.auditLogMaxLines;
+
+      if (shouldRotateBySize || shouldRotateByLines) {
+        await this.rotateLogFile();
+      }
+    } catch (error) {
+      console.error('Failed to check log rotation:', error);
+    }
+  }
+
+  async rotateLogFile() {
+    try {
+      const logDir = path.dirname(this.auditLogFile);
+      const logName = path.basename(this.auditLogFile, path.extname(this.auditLogFile));
+      const logExt = path.extname(this.auditLogFile);
+
+      // Rotate existing files
+      for (let i = this.auditLogMaxFiles - 1; i >= 1; i--) {
+        const oldFile = path.join(logDir, `${logName}.${i}${logExt}`);
+        const newFile = path.join(logDir, `${logName}.${i + 1}${logExt}`);
+
+        if (await fs.pathExists(oldFile)) {
+          if (i === this.auditLogMaxFiles - 1) {
+            // Delete the oldest file
+            await fs.remove(oldFile);
+          } else {
+            await fs.move(oldFile, newFile);
+          }
+        }
+      }
+
+      // Move current log to .1
+      const rotatedFile = path.join(logDir, `${logName}.1${logExt}`);
+      await fs.move(this.auditLogFile, rotatedFile);
+
+      // Reset line counter
+      this.auditLogCurrentLines = 0;
+
+      console.log(`📝 Log rotated: ${this.auditLogFile} -> ${rotatedFile}`);
+      await this.logAudit('SYSTEM', 'Log file rotated', {
+        rotatedTo: rotatedFile,
+        maxSize: this.auditLogMaxSize,
+        maxLines: this.auditLogMaxLines
+      });
+    } catch (error) {
+      console.error('Failed to rotate log file:', error);
+    }
+  }
+
   setupMiddleware() {
+    // Audit logging middleware
+    if (this.auditLoggingEnabled) {
+      this.bot.use(async (ctx, next) => {
+        const user = ctx.from;
+        const chat = ctx.chat;
+        const message = ctx.message;
+
+        // Log the incoming request
+        await this.logAudit('REQUEST', 'Incoming message', {
+          userId: user?.id,
+          username: user?.username,
+          firstName: user?.first_name,
+          chatId: chat?.id,
+          chatType: chat?.type,
+          messageType: message?.text ? 'text' : 'other',
+          command: message?.text?.startsWith('/') ? message.text.split(' ')[0] : null,
+          messageText: message?.text?.substring(0, 100) // Truncate long messages
+        });
+
+        return next();
+      });
+    }
+
     // Authorization middleware
     this.bot.use((ctx, next) => {
       if (
@@ -33,6 +173,17 @@ class PM2TelegramBot {
       ) {
         return next();
       }
+
+      // Log unauthorized access attempt
+      if (this.auditLoggingEnabled) {
+        this.logAudit('SECURITY', 'Unauthorized access attempt', {
+          userId: ctx.from?.id,
+          username: ctx.from?.username,
+          chatId: ctx.chat?.id,
+          messageText: ctx.message?.text
+        });
+      }
+
       console.log("Unauthorized from chat", ctx.from);
       return ctx.reply("❌ Unauthorized access. Contact the administrator.");
     });
@@ -64,6 +215,8 @@ class PM2TelegramBot {
         "• <code>/reload &lt;name&gt;</code> - Reload specific app\n" +
         "• <code>/logs &lt;name&gt;</code> - Show app logs\n" +
         "• <code>/monitor</code> - Toggle monitoring\n" +
+        "• <code>/auditlogs [lines]</code> - View audit logs\n" +
+        "• <code>/clearaudit</code> - Clear audit logs\n" +
         "• <code>/help</code> - Show this help",
         {
           parse_mode: "HTML",
@@ -109,6 +262,10 @@ class PM2TelegramBot {
 
     // Settings
     this.bot.hears("⚙️ Settings", (ctx) => this.showSettings(ctx));
+
+    // Audit logging commands
+    this.bot.command("auditlogs", (ctx) => this.getAuditLogs(ctx));
+    this.bot.command("clearaudit", (ctx) => this.clearAuditLogs(ctx));
 
     // Callback query handlers
     this.bot.on("callback_query", (ctx) => this.handleCallbackQuery(ctx));
@@ -712,9 +869,128 @@ class PM2TelegramBot {
       `CPU Threshold: <code>${this.cpuThreshold}%</code>\n` +
       `Memory Threshold: <code>${this.memoryThreshold}MB</code>\n` +
       `Restart Threshold: <code>${this.restartThreshold}</code>\n\n` +
+      `Audit Logging: <code>${this.auditLoggingEnabled ? 'Enabled' : 'Disabled'}</code>\n` +
+      `Log File: <code>${this.auditLogFile}</code>\n` +
+      `Current Lines: <code>${this.auditLogCurrentLines}</code>\n` +
+      `Max Lines: <code>${this.auditLogMaxLines}</code>\n` +
+      `Max Size: <code>${Math.round(this.auditLogMaxSize / 1024 / 1024)}MB</code>\n\n` +
       `Authorized Users: <code>${this.authorizedUsers.length}</code>`;
 
     ctx.reply(message, { parse_mode: "HTML" });
+  }
+
+  async getAuditLogs(ctx) {
+    if (!this.auditLoggingEnabled) {
+      return ctx.reply('📝 Audit logging is disabled. Enable it in environment settings.');
+    }
+
+    try {
+      const args = ctx.match?.trim().split(' ') || [];
+      const lines = parseInt(args[0]) || 20;
+
+      if (!await fs.pathExists(this.auditLogFile)) {
+        return ctx.reply('📝 No audit log file found.');
+      }
+
+      const content = await fs.readFile(this.auditLogFile, 'utf8');
+      const logLines = content.trim().split('\n').filter(line => line.trim());
+
+      if (logLines.length === 0) {
+        return ctx.reply('📝 Audit log is empty.');
+      }
+
+      // Get recent logs
+      const recentLogs = logLines.slice(-lines);
+      let message = `📝 <b>Audit Logs</b> (last ${recentLogs.length} entries)\n\n`;
+
+      recentLogs.forEach(line => {
+        try {
+          const entry = JSON.parse(line);
+          const time = new Date(entry.timestamp).toLocaleString();
+          message += `🕐 <code>${time}</code>\n`;
+          message += `📋 <b>${entry.action}</b>: ${entry.description}\n`;
+
+          if (entry.metadata && Object.keys(entry.metadata).length > 0) {
+            const metaStr = Object.entries(entry.metadata)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join(', ');
+            message += `📊 <code>${metaStr}</code>\n`;
+          }
+          message += '\n';
+        } catch (error) {
+          // Skip malformed log entries
+        }
+      });
+
+      // Split message if too long
+      if (message.length > 4000) {
+        const parts = this.splitMessage(message, 4000);
+        for (const part of parts) {
+          await ctx.reply(part, { parse_mode: 'HTML' });
+        }
+      } else {
+        const keyboard = new InlineKeyboard()
+          .text('🔄 Refresh', 'audit_refresh')
+          .text('🗑️ Clear Logs', 'audit_clear');
+
+        ctx.reply(message, {
+          parse_mode: 'HTML',
+          reply_markup: keyboard
+        });
+      }
+
+      await this.logAudit('AUDIT_VIEW', `Viewed audit logs (${lines} entries)`, { requestedLines: lines });
+
+    } catch (error) {
+      ctx.reply(`❌ Error reading audit logs: ${error.message}`);
+    }
+  }
+
+  async clearAuditLogs(ctx) {
+    if (!this.auditLoggingEnabled) {
+      return ctx.reply('📝 Audit logging is disabled.');
+    }
+
+    try {
+      if (await fs.pathExists(this.auditLogFile)) {
+        // Backup current log before clearing
+        const backupFile = `${this.auditLogFile}.backup.${Date.now()}`;
+        await fs.copy(this.auditLogFile, backupFile);
+
+        // Clear the log file
+        await fs.writeFile(this.auditLogFile, '');
+        this.auditLogCurrentLines = 0;
+
+        await this.logAudit('AUDIT_CLEAR', 'Audit logs cleared', { backupFile });
+        ctx.reply(`✅ Audit logs cleared. Backup saved to: <code>${backupFile}</code>`, { parse_mode: 'HTML' });
+      } else {
+        ctx.reply('📝 No audit log file to clear.');
+      }
+    } catch (error) {
+      ctx.reply(`❌ Error clearing audit logs: ${error.message}`);
+    }
+  }
+
+  splitMessage(message, maxLength) {
+    const parts = [];
+    let currentPart = '';
+    const lines = message.split('\n');
+
+    for (const line of lines) {
+      if ((currentPart + line + '\n').length > maxLength) {
+        if (currentPart) {
+          parts.push(currentPart);
+          currentPart = '';
+        }
+      }
+      currentPart += line + '\n';
+    }
+
+    if (currentPart) {
+      parts.push(currentPart);
+    }
+
+    return parts;
   }
 
   async handleCallbackQuery(ctx) {
@@ -853,6 +1129,10 @@ class PM2TelegramBot {
       );
     } else if (data === 'quick_status') {
       await this.getQuickStatus(ctx);
+    } else if (data === 'audit_refresh') {
+      await this.getAuditLogs(ctx);
+    } else if (data === 'audit_clear') {
+      await this.clearAuditLogs(ctx);
     } else if (data === 'noop') {
       // No operation (for pagination display)
       ctx.answerCallbackQuery();
@@ -1013,13 +1293,22 @@ class PM2TelegramBot {
   }
 
   async pm2Restart(processName) {
+    await this.logAudit('PM2_RESTART', `Restarting process: ${processName}`, { processName });
+
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
-        if (err) return reject(err);
+        if (err) {
+          this.logAudit('PM2_ERROR', `Failed to connect for restart: ${processName}`, { processName, error: err.message });
+          return reject(err);
+        }
 
-        pm2.restart(processName, (err) => {
+        pm2.restart(processName, async (err) => {
           pm2.disconnect();
-          if (err) return reject(err);
+          if (err) {
+            await this.logAudit('PM2_ERROR', `Failed to restart: ${processName}`, { processName, error: err.message });
+            return reject(err);
+          }
+          await this.logAudit('PM2_SUCCESS', `Successfully restarted: ${processName}`, { processName });
           resolve();
         });
       });
@@ -1027,13 +1316,22 @@ class PM2TelegramBot {
   }
 
   async pm2RestartAll() {
+    await this.logAudit('PM2_RESTART_ALL', 'Restarting all processes');
+
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
-        if (err) return reject(err);
+        if (err) {
+          this.logAudit('PM2_ERROR', 'Failed to connect for restart all', { error: err.message });
+          return reject(err);
+        }
 
-        pm2.restart("all", (err) => {
+        pm2.restart("all", async (err) => {
           pm2.disconnect();
-          if (err) return reject(err);
+          if (err) {
+            await this.logAudit('PM2_ERROR', 'Failed to restart all processes', { error: err.message });
+            return reject(err);
+          }
+          await this.logAudit('PM2_SUCCESS', 'Successfully restarted all processes');
           resolve();
         });
       });
@@ -1041,13 +1339,22 @@ class PM2TelegramBot {
   }
 
   async pm2Stop(processName) {
+    await this.logAudit('PM2_STOP', `Stopping process: ${processName}`, { processName });
+
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
-        if (err) return reject(err);
+        if (err) {
+          this.logAudit('PM2_ERROR', `Failed to connect for stop: ${processName}`, { processName, error: err.message });
+          return reject(err);
+        }
 
-        pm2.stop(processName, (err) => {
+        pm2.stop(processName, async (err) => {
           pm2.disconnect();
-          if (err) return reject(err);
+          if (err) {
+            await this.logAudit('PM2_ERROR', `Failed to stop: ${processName}`, { processName, error: err.message });
+            return reject(err);
+          }
+          await this.logAudit('PM2_SUCCESS', `Successfully stopped: ${processName}`, { processName });
           resolve();
         });
       });
@@ -1069,13 +1376,22 @@ class PM2TelegramBot {
   }
 
   async pm2Start(processName) {
+    await this.logAudit('PM2_START', `Starting process: ${processName}`, { processName });
+
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
-        if (err) return reject(err);
+        if (err) {
+          this.logAudit('PM2_ERROR', `Failed to connect for start: ${processName}`, { processName, error: err.message });
+          return reject(err);
+        }
 
-        pm2.start(processName, (err) => {
+        pm2.start(processName, async (err) => {
           pm2.disconnect();
-          if (err) return reject(err);
+          if (err) {
+            await this.logAudit('PM2_ERROR', `Failed to start: ${processName}`, { processName, error: err.message });
+            return reject(err);
+          }
+          await this.logAudit('PM2_SUCCESS', `Successfully started: ${processName}`, { processName });
           resolve();
         });
       });
@@ -1097,13 +1413,22 @@ class PM2TelegramBot {
   }
 
   async pm2Reload(processName) {
+    await this.logAudit('PM2_RELOAD', `Reloading process: ${processName}`, { processName });
+
     return new Promise((resolve, reject) => {
       pm2.connect((err) => {
-        if (err) return reject(err);
+        if (err) {
+          this.logAudit('PM2_ERROR', `Failed to connect for reload: ${processName}`, { processName, error: err.message });
+          return reject(err);
+        }
 
-        pm2.reload(processName, (err) => {
+        pm2.reload(processName, async (err) => {
           pm2.disconnect();
-          if (err) return reject(err);
+          if (err) {
+            await this.logAudit('PM2_ERROR', `Failed to reload: ${processName}`, { processName, error: err.message });
+            return reject(err);
+          }
+          await this.logAudit('PM2_SUCCESS', `Successfully reloaded: ${processName}`, { processName });
           resolve();
         });
       });
