@@ -119,9 +119,39 @@ class PM2TelegramBot {
         message += `   Uptime: <code>${uptime}</code> | Restarts: <code>${restarts}</code>\n\n`;
       });
 
-      const keyboard = new InlineKeyboard()
+      // Create keyboard with individual app controls
+      const keyboard = new InlineKeyboard();
+      
+      // Add individual app controls
+      processes.forEach(proc => {
+        const status = proc.pm2_env.status;
+        const name = proc.name;
+        
+        if (status === 'online') {
+          // For online processes: restart, reload, stop, logs
+          keyboard
+            .text(`🔄 ${name}`, `restart_${name}`)
+            .text(`🔃 ${name}`, `reload_${name}`)
+            .row()
+            .text(`⏹️ ${name}`, `stop_${name}`)
+            .text(`📄 ${name}`, `logs_${name}`)
+            .row();
+        } else {
+          // For stopped processes: start, logs
+          keyboard
+            .text(`▶️ ${name}`, `start_${name}`)
+            .text(`📄 ${name}`, `logs_${name}`)
+            .row();
+        }
+      });
+
+      // Add general controls
+      keyboard
         .text('🔄 Refresh', 'refresh_status')
-        .text('📈 Details', 'detailed_status');
+        .text('📈 Details', 'detailed_status')
+        .row()
+        .text('🔄 Restart All', 'restart_all')
+        .text('⏹️ Stop All', 'stop_all');
 
       ctx.reply(message, { 
         parse_mode: 'HTML',
@@ -389,6 +419,22 @@ class PM2TelegramBot {
     } else if (data.startsWith('logs_')) {
       const processName = data.replace('logs_', '');
       await this.getProcessLogs({ match: processName, reply: ctx.reply.bind(ctx) });
+    } else if (data === 'restart_all') {
+      try {
+        await this.pm2RestartAll();
+        ctx.answerCallbackQuery('✅ All processes restarted');
+        await this.getProcessStatus(ctx);
+      } catch (error) {
+        ctx.answerCallbackQuery('❌ Failed to restart all processes');
+      }
+    } else if (data === 'stop_all') {
+      try {
+        await this.pm2StopAll();
+        ctx.answerCallbackQuery('✅ All processes stopped');
+        await this.getProcessStatus(ctx);
+      } catch (error) {
+        ctx.answerCallbackQuery('❌ Failed to stop all processes');
+      }
     }
   }
   async getDetailedStatus(ctx) {
