@@ -1,0 +1,22 @@
+{
+  "name": "pm2-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for PM2 process management with monitoring and auto-restart",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "nodemon src/bot.js"
+  },
+  "dependencies": {
+    "grammy": "^1.38.3",
+    "pm2": "^5.3.0",
+    "node-cron": "^3.0.3",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": ["telegram", "bot", "pm2", "process-management", "monitoring"],
+  "author": "",
+  "license": "MIT"
+}
