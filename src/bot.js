@@ -21,10 +21,10 @@ class PM2TelegramBot {
   setupMiddleware() {
     // Authorization middleware
     this.bot.use((ctx, next) => {
-      if (this.authorizedUsers.length === 0 || this.authorizedUsers.includes(ctx.from?.id)) {
+      if (this.authorizedUsers.length === 0 || this.authorizedUsers.includes(ctx.from?.id) || this.authorizedUsers.includes(ctx.from?.username)) {
         return next();
       }
-      console.log('From chat', ctx.from)
+      console.log('Unauthorized from chat', ctx.from)
       return ctx.reply('❌ Unauthorized access. Contact the administrator.');
     });
   }
