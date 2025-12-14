@@ -52,16 +52,16 @@ class PM2TelegramBot {
 
       ctx.reply(
         "🤖 <b>PM2 Management Bot</b>\n\n" +
-          "Welcome! I can help you manage your PM2 processes.\n\n" +
-          "Use the buttons below or these commands:\n" +
-          "• <code>/status</code> - Show all processes\n" +
-          "• <code>/restart &lt;name&gt;</code> - Restart specific app\n" +
-          "• <code>/stop &lt;name&gt;</code> - Stop specific app\n" +
-          "• <code>/start &lt;name&gt;</code> - Start specific app\n" +
-          "• <code>/reload &lt;name&gt;</code> - Reload specific app\n" +
-          "• <code>/logs &lt;name&gt;</code> - Show app logs\n" +
-          "• <code>/monitor</code> - Toggle monitoring\n" +
-          "• <code>/help</code> - Show this help",
+        "Welcome! I can help you manage your PM2 processes.\n\n" +
+        "Use the buttons below or these commands:\n" +
+        "• <code>/status</code> - Show all processes\n" +
+        "• <code>/restart &lt;name&gt;</code> - Restart specific app\n" +
+        "• <code>/stop &lt;name&gt;</code> - Stop specific app\n" +
+        "• <code>/start &lt;name&gt;</code> - Start specific app\n" +
+        "• <code>/reload &lt;name&gt;</code> - Reload specific app\n" +
+        "• <code>/logs &lt;name&gt;</code> - Show app logs\n" +
+        "• <code>/monitor</code> - Toggle monitoring\n" +
+        "• <code>/help</code> - Show this help",
         {
           parse_mode: "HTML",
           reply_markup: keyboard,
@@ -352,14 +352,102 @@ class PM2TelegramBot {
         return ctx.reply(`📄 No recent logs found for "${processName}".`);
       }
 
-      console.log("Logs", processName, logs);
+      // Limit message length to avoid Telegram's 4096 character limit
+      const logText = logs.join('\n');
+      const maxLength = 3500; // Leave room for the header and formatting
 
-      const message = `📄 <b>Recent logs for ${processName}:</b>\n\n<pre>${logs
-        .slice(-20)
-        .join("\n")}</pre>`;
-      ctx.reply(message, { parse_mode: "HTML" });
+      let displayLogs = logText;
+      if (logText.length > maxLength) {
+        displayLogs = '...\n' + logText.slice(-maxLength);
+      }
+
+      const message = `📄 <b>Recent logs for ${processName}:</b>\n\n<pre>${displayLogs}</pre>`;
+
+      // Add refresh button for logs
+      const keyboard = new InlineKeyboard()
+        .text('🔄 Refresh Logs', `logs_${processName}`)
+        .text('📊 Back to Status', 'refresh_status');
+
+      ctx.reply(message, {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
     } catch (error) {
       ctx.reply(`❌ Failed to get logs for "${processName}": ${error.message}`);
+    }
+  }
+
+  async showProcessLogs(ctx, processName, lines = 20) {
+    try {
+      ctx.answerCallbackQuery(`📄 Getting ${lines} lines of logs...`);
+
+      const logs = await this.getPM2Logs(processName, lines);
+      if (logs.length === 0) {
+        return ctx.reply(`📄 No recent logs found for "${processName}".`);
+      }
+
+      // Limit message length to avoid Telegram's 4096 character limit
+      const logText = logs.join('\n');
+      const maxLength = 3500; // Leave room for the header and formatting
+
+      let displayLogs = logText;
+      if (logText.length > maxLength) {
+        displayLogs = '...\n' + logText.slice(-maxLength);
+      }
+
+      const message = `📄 <b>Recent ${lines} lines for ${processName}:</b>\n\n<pre>${displayLogs}</pre>`;
+
+      // Add action buttons
+      const keyboard = new InlineKeyboard()
+        .text('🔄 Refresh', `viewlogs_${processName}_${lines}`)
+        .text('🔴 Error Logs', `errorlogs_${processName}`)
+        .row()
+        .text('📊 Back to Status', 'refresh_status')
+        .text('📄 Log Menu', `logs_${processName}`);
+
+      ctx.reply(message, {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    } catch (error) {
+      ctx.reply(`❌ Failed to get logs for "${processName}": ${error.message}`);
+    }
+  }
+
+  async showProcessErrorLogs(ctx, processName) {
+    try {
+      ctx.answerCallbackQuery('🔴 Getting error logs...');
+
+      const errorLogs = await this.getPM2ErrorLogs(processName, 15);
+      if (errorLogs.length === 0) {
+        return ctx.reply(`🔴 No recent error logs found for "${processName}".`);
+      }
+
+      // Limit message length
+      const logText = errorLogs.join('\n');
+      const maxLength = 3500;
+
+      let displayLogs = logText;
+      if (logText.length > maxLength) {
+        displayLogs = '...\n' + logText.slice(-maxLength);
+      }
+
+      const message = `🔴 <b>Error logs for ${processName}:</b>\n\n<pre>${displayLogs}</pre>`;
+
+      // Add action buttons
+      const keyboard = new InlineKeyboard()
+        .text('🔄 Refresh Errors', `errorlogs_${processName}`)
+        .text('📄 All Logs', `viewlogs_${processName}_20`)
+        .row()
+        .text('📊 Back to Status', 'refresh_status')
+        .text('📄 Log Menu', `logs_${processName}`);
+
+      ctx.reply(message, {
+        parse_mode: "HTML",
+        reply_markup: keyboard
+      });
+    } catch (error) {
+      ctx.reply(`❌ Failed to get error logs for "${processName}": ${error.message}`);
     }
   }
 
@@ -468,10 +556,28 @@ class PM2TelegramBot {
       }
     } else if (data.startsWith("logs_")) {
       const processName = data.replace("logs_", "");
-      await this.getProcessLogs({
-        match: processName,
-        reply: ctx.reply.bind(ctx),
+
+      // Show log options menu
+      const keyboard = new InlineKeyboard()
+        .text('📄 Recent (20 lines)', `viewlogs_${processName}_20`)
+        .text('📄 More (50 lines)', `viewlogs_${processName}_50`)
+        .row()
+        .text('🔴 Error Logs', `errorlogs_${processName}`)
+        .text('📊 Back to Status', 'refresh_status');
+
+      ctx.reply(`📄 <b>Log Options for ${processName}</b>\n\nChoose what logs to view:`, {
+        parse_mode: 'HTML',
+        reply_markup: keyboard
       });
+    } else if (data.startsWith("viewlogs_")) {
+      const parts = data.replace("viewlogs_", "").split("_");
+      const processName = parts[0];
+      const lines = parseInt(parts[1]) || 20;
+
+      await this.showProcessLogs(ctx, processName, lines);
+    } else if (data.startsWith("errorlogs_")) {
+      const processName = data.replace("errorlogs_", "");
+      await this.showProcessErrorLogs(ctx, processName);
     } else if (data === "restart_all") {
       try {
         await this.pm2RestartAll();
@@ -510,12 +616,10 @@ class PM2TelegramBot {
         message += `   Status: <code>${status}</code>\n`;
         message += `   PID: <code>${proc.pid || "N/A"}</code>\n`;
         message += `   CPU: <code>${proc.monit?.cpu || 0}%</code>\n`;
-        message += `   Memory: <code>${
-          proc.monit?.memory ? this.formatBytes(proc.monit.memory) : "0 MB"
-        }</code>\n`;
-        message += `   Uptime: <code>${
-          env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : "N/A"
-        }</code>\n`;
+        message += `   Memory: <code>${proc.monit?.memory ? this.formatBytes(proc.monit.memory) : "0 MB"
+          }</code>\n`;
+        message += `   Uptime: <code>${env.pm_uptime ? this.formatUptime(Date.now() - env.pm_uptime) : "N/A"
+          }</code>\n`;
         message += `   Restarts: <code>${env.restart_time || 0}</code>\n`;
         message += `   Script: <code>${env.pm_exec_path || "N/A"}</code>\n`;
         message += `   Mode: <code>${env.exec_mode || "N/A"}</code>\n\n`;
@@ -598,8 +702,7 @@ class PM2TelegramBot {
         await this.pm2Restart(processName);
         this.restartCounts.set(processName, currentCount + 1);
         await this.sendAlert(
-          `🔄 Auto-restarted stuck process: ${processName} (attempt ${
-            currentCount + 1
+          `🔄 Auto-restarted stuck process: ${processName} (attempt ${currentCount + 1
           }/${this.restartThreshold})`
         );
       } catch (error) {
@@ -745,8 +848,68 @@ class PM2TelegramBot {
     });
   }
 
-  async getPM2Logs(processName) {
-    // TODO: PM2 doesn't have a direct logs API, so use direct access with pm2 command cli `pm2 log ${app_name}`
+  async getPM2Logs(processName, lines = 20) {
+    return new Promise((resolve, reject) => {
+      // Use pm2 logs command with --lines to limit output and avoid overflow
+      const command = `pm2 logs ${processName} --lines ${lines} --nostream`;
+
+      exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`Error getting logs for ${processName}:`, error);
+          return reject(new Error(`Failed to get logs: ${error.message}`));
+        }
+
+        if (stderr) {
+          console.warn(`PM2 logs stderr for ${processName}:`, stderr);
+        }
+
+        // Parse the output and return as array of lines
+        const lines = stdout.trim().split('\n').filter(line => line.trim() !== '');
+
+        // If no logs found, return empty array
+        if (lines.length === 0 || stdout.includes('No logs found')) {
+          return resolve([]);
+        }
+
+        // Clean up the log lines and remove PM2 formatting if needed
+        const cleanedLines = lines.map(line => {
+          // Remove ANSI color codes and clean up formatting
+          return line
+            .replace(/\x1b\[[0-9;]*m/g, '')
+            .replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\s*/, '') // Remove timestamp prefix if present
+            .trim();
+        }).filter(line => line.length > 0);
+
+        resolve(cleanedLines);
+      });
+    });
+  }
+
+  async getPM2ErrorLogs(processName, lines = 10) {
+    return new Promise((resolve, reject) => {
+      // Get error logs specifically
+      const command = `pm2 logs ${processName} --err --lines ${lines} --nostream`;
+
+      exec(command, { timeout: 10000 }, (error, stdout, stderr) => {
+        if (error) {
+          console.error(`Error getting error logs for ${processName}:`, error);
+          return reject(new Error(`Failed to get error logs: ${error.message}`));
+        }
+
+        // Parse and clean the output
+        const lines = stdout.trim().split('\n').filter(line => line.trim() !== '');
+
+        if (lines.length === 0) {
+          return resolve([]);
+        }
+
+        const cleanedLines = lines.map(line => {
+          return line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+        }).filter(line => line.length > 0);
+
+        resolve(cleanedLines);
+      });
+    });
   }
 
   // Utility methods
