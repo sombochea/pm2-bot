@@ -16,8 +16,8 @@ class PM2TelegramBot {
     this.authorizedChatsForAlert =
       process.env.AUTHORIZED_CHATS_FOR_ALERT?.split(",").map((id) => parseInt(id)) || [];
     this.monitorInterval = parseInt(process.env.MONITOR_INTERVAL) || 30000;
-    this.cpuThreshold = parseInt(process.env.CPU_THRESHOLD) || 80;
-    this.memoryThreshold = parseInt(process.env.MEMORY_THRESHOLD) || 80;
+    this.cpuThreshold = parseInt(process.env.CPU_THRESHOLD) || 90;
+    this.memoryThreshold = parseInt(process.env.MEMORY_THRESHOLD) || 512;
 
     // Audit logging configuration
     this.auditLoggingEnabled = process.env.AUDIT_LOGGING_ENABLED === 'true';
@@ -263,6 +263,7 @@ class PM2TelegramBot {
     // Callback query handlers
     this.bot.on("callback_query", (ctx) => this.handleCallbackQuery(ctx));
   }
+
   async getProcessStatus(ctx) {
     try {
       const processes = await this.getPM2ProcessesCLI();
@@ -319,8 +320,6 @@ class PM2TelegramBot {
       errored: processes.filter(p => p.status === 'errored').length
     };
   }
-
-
 
   async restartAllProcesses(ctx) {
     try {
@@ -387,7 +386,6 @@ class PM2TelegramBot {
       ctx.reply(`❌ Error: ${error.message}`);
     }
   }
-
 
   async getMonitoringStatus(ctx) {
     try {
@@ -626,7 +624,6 @@ class PM2TelegramBot {
     }
   }
 
-
   startMonitoring() {
     // Monitor every 30 seconds (or configured interval)
     setInterval(async () => {
@@ -689,6 +686,7 @@ class PM2TelegramBot {
       }
     }
   }
+
   // Secure PM2 CLI methods
   async getPM2ProcessesCLI() {
     try {
