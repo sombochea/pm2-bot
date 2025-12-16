@@ -199,7 +199,7 @@ class PM2TelegramBot {
     this.bot.command("start", (ctx) => {
       const keyboard = new Keyboard()
         .text("📊 Status")
-        .text("� Monitor ")
+        .text("📈 Monitor")
         .row()
         .text("🔄 Restart All")
         .text("⏹️ Stop All")
