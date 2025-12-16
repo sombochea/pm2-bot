@@ -682,7 +682,7 @@ class PM2TelegramBot {
           }
         );
       } catch (error) {
-        console.error(`Failed to send alert to user ${userId}:`, error);
+        console.error(`Failed to send alert to user ${chatId}:`, error);
       }
     }
   }
