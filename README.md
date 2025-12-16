@@ -1,27 +1,25 @@
 # PM2 Telegram Bot
 
-A comprehensive Telegram bot for managing PM2 processes with real-time monitoring, auto-restart capabilities, and resource usage alerts.
+A secure Telegram bot for managing PM2 processes with real-time monitoring and essential bulk operations. Refactored to use PM2 CLI commands for enhanced security and reliability.
 
 ## Features
 
 ### 🎛️ Process Management
 - **Status Monitoring**: View all PM2 processes with CPU, memory, uptime, and restart counts
-- **Process Control**: Start, stop, restart, and reload individual processes or all at once
+- **Bulk Operations**: Safely restart, stop, or start all processes with confirmation prompts
 - **Interactive Interface**: Use buttons or commands for easy process management
 
 ### 📊 Real-time Monitoring
 - **Resource Monitoring**: Track CPU and memory usage for all processes
 - **Threshold Alerts**: Get notified when processes exceed CPU/memory limits
-- **Health Checks**: Automatic detection of stuck or unresponsive processes
+- **Health Monitoring**: Continuous monitoring of process health metrics
 
-### 🔄 Auto-restart System
-- **Stuck Process Detection**: Automatically identifies processes that appear stuck
-- **Smart Restart Logic**: Attempts to restart stuck processes with configurable retry limits
-- **Alert System**: Notifies administrators of auto-restart actions and failures
-
-### 🔐 Security
+### 🔐 Enhanced Security
+- **CLI-based Operations**: Uses secure PM2 CLI commands instead of Node API
 - **User Authorization**: Only authorized users can control PM2 processes
-- **Secure Commands**: All operations require proper authentication
+- **Confirmation Prompts**: All bulk operations require explicit confirmation
+- **Audit Logging**: Complete audit trail of all operations
+- **Command Validation**: Prevents accidental process management
 
 ## Installation
 
@@ -56,38 +54,38 @@ RESTART_THRESHOLD=5
 
 ### Commands
 
+**Essential Commands (Secure & Confirmed):**
 - `/start` - Show welcome message and main menu
 - `/status` - Display all PM2 processes status
-- `/restart <name>` - Restart specific process
-- `/stop <name>` - Stop specific process  
-- `/start <name>` - Start specific process
-- `/reload <name>` - Reload specific process (zero-downtime)
-- `/logs <name>` - View process logs
-- `/monitor` - Show monitoring status
+- `/monitor` - Show detailed monitoring information
+- `/restartall` - Restart all processes (with confirmation)
+- `/stopall` - Stop all processes (with confirmation)
+- `/startall` - Start all processes (with confirmation)
+- `/auditlogs [lines]` - View audit logs
+- `/clearaudit` - Clear audit logs
 - `/help` - Show help message
 
 ### Interactive Buttons
 
-The bot provides an intuitive button interface for common operations:
+The bot provides a secure button interface for essential operations:
 - 📊 Status - View process status
-- 🔄 Restart All - Restart all processes
-- ⏹️ Stop All - Stop all processes
-- ▶️ Start All - Start all processes
 - 📈 Monitor - View monitoring dashboard
+- 🔄 Restart All - Restart all processes (with confirmation)
+- ⏹️ Stop All - Stop all processes (with confirmation)
+- ▶️ Start All - Start all processes (with confirmation)
 - ⚙️ Settings - View bot configuration
 
-### Monitoring Features
+### Security Features
 
-#### Automatic Alerts
-- **High CPU Usage**: Alerts when any process exceeds the CPU threshold
-- **High Memory Usage**: Alerts when any process exceeds the memory threshold
-- **Stuck Process Detection**: Identifies and attempts to restart unresponsive processes
+#### Confirmation System
+- **Bulk Operations**: All bulk operations require explicit confirmation
+- **No Individual Process Control**: Prevents accidental single process management
+- **Audit Trail**: Complete logging of all operations with user tracking
 
-#### Auto-restart Logic
-1. Detects processes that appear stuck (0% CPU for extended periods)
-2. Attempts restart up to the configured threshold
-3. Sends alerts for each restart attempt
-4. Requires manual intervention after threshold is reached
+#### Monitoring Features
+- **Resource Alerts**: Alerts when processes exceed CPU/memory thresholds
+- **Health Monitoring**: Continuous monitoring without auto-restart interference
+- **Safe Thresholds**: Configurable alerting without automatic actions
 
 ## Configuration
 
@@ -97,10 +95,16 @@ The bot provides an intuitive button interface for common operations:
 |----------|-------------|---------|
 | `BOT_TOKEN` | Telegram bot token from BotFather | Required |
 | `AUTHORIZED_USERS` | Comma-separated list of user IDs | Required |
+| `AUTHORIZED_CHATS_FOR_ALERT` | Comma-separated list of chat IDs for alerts | Optional |
 | `MONITOR_INTERVAL` | Monitoring check interval (ms) | 30000 |
 | `CPU_THRESHOLD` | CPU usage alert threshold (%) | 80 |
 | `MEMORY_THRESHOLD` | Memory usage alert threshold (MB) | 80 |
-| `RESTART_THRESHOLD` | Max auto-restart attempts | 5 |
+| `PM2_COMMAND_TIMEOUT` | PM2 CLI command timeout (ms) | 30000 |
+| `AUDIT_LOGGING_ENABLED` | Enable audit logging (true/false) | false |
+| `AUDIT_LOG_FILE` | Audit log file path | logs/bot-audit.log |
+| `AUDIT_LOG_MAX_SIZE` | Max audit log file size (bytes) | 10485760 |
+| `AUDIT_LOG_MAX_FILES` | Max number of audit log files | 5 |
+| `AUDIT_LOG_MAX_LINES` | Max lines per audit log file | 10000 |
 
 ### Getting Your Telegram User ID
 
@@ -139,8 +143,16 @@ pm2 startup
 
 1. **Bot not responding**: Check if the bot token is correct
 2. **Unauthorized access**: Verify your user ID is in the authorized users list
-3. **PM2 connection errors**: Ensure PM2 is installed and running
-4. **Monitoring not working**: Check if the monitoring interval is set correctly
+3. **PM2 CLI errors**: Ensure PM2 is installed and accessible via CLI
+4. **Command timeouts**: Adjust `PM2_COMMAND_TIMEOUT` if operations are slow
+5. **Monitoring not working**: Check if the monitoring interval is set correctly
+
+### Security Notes
+
+- **CLI-based**: Uses `pm2 jlist`, `pm2 restart all`, `pm2 stop all`, `pm2 start all` commands
+- **No Individual Control**: Individual process management removed for safety
+- **Confirmation Required**: All bulk operations require explicit confirmation
+- **Audit Logging**: Enable audit logging to track all operations
 
 ### Logs
 
