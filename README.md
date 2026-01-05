@@ -48,6 +48,74 @@ MONITOR_INTERVAL=30000
 CPU_THRESHOLD=80
 MEMORY_THRESHOLD=80
 RESTART_THRESHOLD=5
+
+# Self-protection (prevents infinite restart loops)
+PM2_PROCESS_NAME=pm2-telegram-bot
+EXCLUDE_SELF_FROM_OPERATIONS=true
+```
+
+## ⚠️ Critical: Preventing Infinite Restart Loops
+
+When running the bot under PM2, it's crucial to prevent the bot from managing itself, which can cause infinite restart loops. The bot now includes **self-protection mechanisms**:
+
+### How It Works
+1. **Process Name Detection**: The bot detects its own PM2 process name via `PM2_PROCESS_NAME` environment variable
+2. **Auto-Exclusion**: When executing bulk operations (restart all, stop all, start all), the bot automatically excludes itself
+3. **Restart Limits**: PM2 is configured with restart limits and exponential backoff to prevent runaway restarts
+
+### Deployment Options
+
+#### Option 1: Using PM2 Ecosystem File (Recommended)
+```bash
+# Start with the provided ecosystem config
+pm2 start ecosystem.config.js
+
+# Save PM2 configuration
+pm2 save
+
+# Setup PM2 to start on system boot
+pm2 startup
+```
+
+#### Option 2: Manual PM2 Start
+```bash
+# Start with explicit process name
+pm2 start src/bot.js --name pm2-telegram-bot
+
+# Set environment variable
+pm2 set pm2-telegram-bot:PM2_PROCESS_NAME pm2-telegram-bot
+pm2 set pm2-telegram-bot:EXCLUDE_SELF_FROM_OPERATIONS true
+
+# Restart to apply changes
+pm2 restart pm2-telegram-bot
+```
+
+#### Option 3: Direct Node.js (No Self-Protection Needed)
+```bash
+# If not running under PM2, just start normally
+node src/bot.js
+# or
+npm start
+```
+
+### Verifying Self-Protection
+Check the bot logs when it starts. You should see:
+```
+🛡️ Self-protection enabled: Bot process name = "pm2-telegram-bot" (PID: 12345)
+```
+
+If you see this warning instead, the bot cannot detect itself:
+```
+⚠️ Warning: Bot process name not detected. Set PM2_PROCESS_NAME env var to enable self-protection.
+```
+
+### Ecosystem Config Features
+The `ecosystem.config.js` includes these safeguards:
+- **max_restarts: 10** - Limits restart attempts
+- **min_uptime: '10s'** - Requires 10s uptime before considering successful
+- **restart_delay: 4000** - Waits 4s before restarting
+- **exp_backoff_restart_delay** - Exponential backoff for repeated failures
+
 ```
 
 ## Usage

@@ -5,7 +5,13 @@
   "main": "src/bot.js",
   "scripts": {
     "start": "node src/bot.js",
-    "dev": "nodemon src/bot.js"
+    "dev": "nodemon src/bot.js",
+    "pm2:start": "./scripts/start-pm2.sh",
+    "pm2:stop": "pm2 stop pm2-telegram-bot",
+    "pm2:restart": "pm2 restart pm2-telegram-bot",
+    "pm2:logs": "pm2 logs pm2-telegram-bot",
+    "pm2:status": "pm2 status pm2-telegram-bot",
+    "pm2:monitor": "pm2 monit"
   },
   "dependencies": {
     "grammy": "^1.38.3",

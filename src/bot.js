@@ -19,6 +19,10 @@ class PM2TelegramBot {
     this.cpuThreshold = parseInt(process.env.CPU_THRESHOLD) || 90;
     this.memoryThreshold = parseInt(process.env.MEMORY_THRESHOLD) || 512;
 
+    // Bot self-protection: prevent managing itself when running under PM2
+    this.botProcessName = process.env.PM2_PROCESS_NAME || process.env.name || null;
+    this.excludeSelfFromOperations = process.env.EXCLUDE_SELF_FROM_OPERATIONS !== 'false'; // default true
+
     // Audit logging configuration
     this.auditLoggingEnabled = process.env.AUDIT_LOGGING_ENABLED === 'true';
     this.auditLogFile = process.env.AUDIT_LOG_FILE || 'logs/bot-audit.log';
@@ -688,6 +692,26 @@ class PM2TelegramBot {
   }
 
   // Secure PM2 CLI methods
+  
+  // Filter out bot's own process to prevent self-management
+  filterSelfProcess(processes) {
+    if (!this.excludeSelfFromOperations || !this.botProcessName) {
+      return processes;
+    }
+    
+    const currentPid = process.pid;
+    const filtered = processes.filter(proc => {
+      // Exclude by process name or PID
+      return proc.name !== this.botProcessName && proc.pid !== currentPid;
+    });
+    
+    if (filtered.length < processes.length) {
+      console.log(`🛡️ Excluded bot's own process (${this.botProcessName}) from operations`);
+    }
+    
+    return filtered;
+  }
+  
   async getPM2ProcessesCLI() {
     try {
       const { stdout } = await execAsync('pm2 jlist', { timeout: this.commandTimeout });
@@ -732,7 +756,21 @@ class PM2TelegramBot {
     await this.logAuditWithCtx('PM2_RESTART_ALL', 'Restarting all processes via CLI', {}, ctx);
 
     try {
-      const { stdout, stderr } = await execAsync('pm2 restart all', { timeout: this.commandTimeout });
+      // Get all processes and filter out bot's own process
+      const processes = await this.getPM2ProcessesCLI();
+      const filteredProcesses = this.filterSelfProcess(processes);
+      
+      if (filteredProcesses.length === 0) {
+        throw new Error('No processes to restart (excluding bot itself)');
+      }
+      
+      // Restart each process individually (excluding bot)
+      const processNames = filteredProcesses.map(p => p.name).join(' ');
+      const command = this.excludeSelfFromOperations && this.botProcessName 
+        ? `pm2 restart ${processNames}` 
+        : 'pm2 restart all';
+      
+      const { stdout, stderr } = await execAsync(command, { timeout: this.commandTimeout });
 
       if (stderr && !stderr.includes('PM2')) {
         throw new Error(stderr);
@@ -750,7 +788,21 @@ class PM2TelegramBot {
     await this.logAuditWithCtx('PM2_STOP_ALL', 'Stopping all processes via CLI', {}, ctx);
 
     try {
-      const { stdout, stderr } = await execAsync('pm2 stop all', { timeout: this.commandTimeout });
+      // Get all processes and filter out bot's own process
+      const processes = await this.getPM2ProcessesCLI();
+      const filteredProcesses = this.filterSelfProcess(processes);
+      
+      if (filteredProcesses.length === 0) {
+        throw new Error('No processes to stop (excluding bot itself)');
+      }
+      
+      // Stop each process individually (excluding bot)
+      const processNames = filteredProcesses.map(p => p.name).join(' ');
+      const command = this.excludeSelfFromOperations && this.botProcessName 
+        ? `pm2 stop ${processNames}` 
+        : 'pm2 stop all';
+      
+      const { stdout, stderr } = await execAsync(command, { timeout: this.commandTimeout });
 
       if (stderr && !stderr.includes('PM2')) {
         throw new Error(stderr);
@@ -768,7 +820,21 @@ class PM2TelegramBot {
     await this.logAuditWithCtx('PM2_START_ALL', 'Starting all processes via CLI', {}, ctx);
 
     try {
-      const { stdout, stderr } = await execAsync('pm2 start all', { timeout: this.commandTimeout });
+      // Get all processes and filter out bot's own process
+      const processes = await this.getPM2ProcessesCLI();
+      const filteredProcesses = this.filterSelfProcess(processes);
+      
+      if (filteredProcesses.length === 0) {
+        throw new Error('No processes to start (excluding bot itself)');
+      }
+      
+      // Start each process individually (excluding bot)
+      const processNames = filteredProcesses.map(p => p.name).join(' ');
+      const command = this.excludeSelfFromOperations && this.botProcessName 
+        ? `pm2 start ${processNames}` 
+        : 'pm2 start all';
+      
+      const { stdout, stderr } = await execAsync(command, { timeout: this.commandTimeout });
 
       if (stderr && !stderr.includes('PM2')) {
         throw new Error(stderr);
@@ -827,6 +893,12 @@ class PM2TelegramBot {
       process.exit(0);
     });
 
+    // Catch bot startup errors to prevent PM2 restart loops
+    this.bot.catch((err) => {
+      console.error('❌ Bot error caught:', err);
+      // Log but don't exit - let bot continue running
+    });
+
     this.bot.start({
       onStart: (botInfo) => {
         console.log(`🤖 Bot @${botInfo.username} started successfully.`);
@@ -840,6 +912,11 @@ class PM2TelegramBot {
           `⚙️ CPU threshold: ${this.cpuThreshold}%, Memory threshold: ${this.memoryThreshold}MB`
         );
         console.log(`🔒 PM2 CLI: Secure command execution enabled`);
+        if (this.botProcessName) {
+          console.log(`🛡️ Self-protection enabled: Bot process name = "${this.botProcessName}" (PID: ${process.pid})`);
+        } else {
+          console.log(`⚠️ Warning: Bot process name not detected. Set PM2_PROCESS_NAME env var to enable self-protection.`);
+        }
       },
     });
   }

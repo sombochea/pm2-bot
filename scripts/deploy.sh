@@ -1,11 +1,14 @@
 #!/bin/bash
 
+# PM2 Telegram Bot Deployment Script with Self-Protection
+# This script deploys the bot with proper PM2 configuration to prevent infinite restart loops
+
 # Default values
 SERVER=""
 DEST="~/apps/pm2-bot"
 USER="root"
 SSH_PRIVATE_KEY=""
-APP_NAME="pm2-bot"
+APP_NAME="pm2-telegram-bot"  # Changed default to match ecosystem config
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -69,7 +72,7 @@ echo "Deploying PM2 Node.js application to $USER@$SERVER:$DEST"
 ssh $SSH_OPTS $USER@$SERVER "mkdir -p $DEST"
 
 # Copy specific application files to remote server
-rsync -avz -e "ssh $SSH_OPTS" src/ package.json package-lock.json .env $USER@$SERVER:$DEST/
+rsync -avz -e "ssh $SSH_OPTS" src/ package.json package-lock.json ecosystem.config.js .env $USER@$SERVER:$DEST/
 # Set permissions
 ssh $SSH_OPTS $USER@$SERVER "chmod -R 755 $DEST"
 
@@ -77,7 +80,24 @@ ssh $SSH_OPTS $USER@$SERVER "chmod -R 755 $DEST"
 echo "Installing npm dependencies..."
 ssh $SSH_OPTS $USER@$SERVER "cd $DEST && npm install"
 
-# Start/restart the application with PM2
-echo "Starting application with PM2..."
+# Start/restart the application with PM2 using ecosystem config
+echo "Starting application with PM2 (with self-protection)..."
+ssh $SSH_OPTS $USER@$SERVER << EOF
+cd $DEST
+
+# Stop old instance if exists
+pm2 stop $APP_NAME 2>/dev/null || true
+pm2 delete $APP_NAME 2>/dev/null || true
+
+# Start with ecosystem config (includes self-protection)
+pm2 start ecosystem.config.js
+
+# Save PM2 process list
+pm2 save
+
+echo "✅ Deployment complete! Bot is running with self-protection enabled."
+echo "📝 Check logs: pm2 logs $APP_NAME"
+echo "📊 Check status: pm2 status"
+EOF
 ssh $SSH_OPTS $USER@$SERVER "cd $DEST && pm2 delete $APP_NAME 2>/dev/null || true; pm2 start bot.js --name $APP_NAME && pm2 save"
 echo "PM2 Node.js deployment completed successfully!"
